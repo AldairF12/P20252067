@@ -1,4 +1,6 @@
 // content.js
+
+// =================== Estado global ===================
 let avisoActivo = null;
 let ultimoTipoDetectado = null;
 let ultimosMatches = [];
@@ -9,6 +11,7 @@ const state = {
   activo: true,
   paginas: { steam: true, roblox: true, epic: true, discord: true },
   tipos: { correo: true, nombre: true, tarjeta: true, dni: true },
+  // omitidos ya no se usa para omisiones permanentes, se ignora
   omitidos: []
 };
 
@@ -17,6 +20,7 @@ async function loadSettings() {
   if (typeof s.activo === "boolean") state.activo = s.activo;
   if (s.paginas) state.paginas = { ...state.paginas, ...s.paginas };
   if (s.tipos) state.tipos = { ...state.tipos, ...s.tipos };
+  // mantenemos lectura para compatibilidad, pero no se usa para omitir
   if (Array.isArray(s.omitidos)) state.omitidos = s.omitidos;
 }
 loadSettings();
@@ -45,7 +49,49 @@ function paginaHabilitada() {
   return !!state.paginas[key];
 }
 
-// ====== Evento principal ======
+// =================== Omisión temporal (runtime) ===================
+// Silencia avisos por tipo solo durante la "sesión" actual de escritura
+// y/o por un tiempo N milisegundos. También puede atarse al input actual.
+const OMIT_MS = 15000; // 15s de silencio tras "Omitir" (ajústalo)
+let sesionEntrada = 0; // id incremental por flujo/target actual
+const omitidosRuntime = new Map();
+// Estructura: omitidosRuntime.set(tipo, { until, sesion, input })
+
+function nuevaSesion(target) {
+  sesionEntrada += 1;
+  ultimoTarget = target || ultimoTarget;
+  // Al iniciar nueva sesión, limpiamos omisiones que estaban atadas
+  for (const [tipo, info] of omitidosRuntime.entries()) {
+    if (info.sesion !== sesionEntrada) {
+      omitidosRuntime.delete(tipo);
+    }
+  }
+  return sesionEntrada;
+}
+
+function silenciadoPorOmitir(tipo, target) {
+  const info = omitidosRuntime.get(tipo);
+  if (!info) return false;
+  const ahora = Date.now();
+  // Expiró el tiempo
+  if (info.until && info.until < ahora) {
+    omitidosRuntime.delete(tipo);
+    return false;
+  }
+  // Atado al mismo input
+  if (info.input && target && info.input !== target) return false;
+  // Requiere misma sesión
+  if (info.sesion !== sesionEntrada) return false;
+  return true;
+}
+
+function resetOmisionesAlCambiarTipo(tipoActual) {
+  for (const [tipo] of omitidosRuntime.entries()) {
+    if (tipo !== tipoActual) omitidosRuntime.delete(tipo);
+  }
+}
+
+// =================== Evento principal ===================
 document.addEventListener("input", async (event) => {
   const target = event.target;
 
@@ -56,9 +102,17 @@ document.addEventListener("input", async (event) => {
   if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA") return;
 
   const texto = (target.value || "").trim();
-  if (texto.length < 10) return;
+  if (texto.length < 10) {
+    // si borró casi todo, resetea sesión para no “arrastrar” omisiones
+    if (ultimoTarget !== target) nuevaSesion(target);
+    limpiarAviso();
+    return;
+  }
 
-  ultimoTarget = target;
+  // Si cambiaste de input, inicia nueva sesión
+  if (ultimoTarget !== target) {
+    nuevaSesion(target);
+  }
 
   try {
     const response = await fetch("http://127.0.0.1:5000/analizar", {
@@ -77,7 +131,11 @@ document.addEventListener("input", async (event) => {
       tipo = detectarTipoDato(texto);
     }
 
-    console.log(data);
+    // DEBUG
+    console.log("\n");
+    console.log("RESPONSE: ", data);
+    console.log("TIPO DE DATO DETECTADO: ", tipo);
+    console.log("OMITIDOS RUNTIME: ", omitidosRuntime);
 
     // Si no expone o tipo 'ninguno' => limpiar y salir
     if (!expone || tipo === "ninguno") {
@@ -91,10 +149,15 @@ document.addEventListener("input", async (event) => {
       return;
     }
 
-    // Si el tipo fue omitido por el usuario => salir
-    if (state.omitidos.includes(tipo)) {
+    // NUEVO: omisión temporal por sesión/tiempo/campo
+    if (silenciadoPorOmitir(tipo, target)) {
       limpiarAviso();
       return;
+    }
+
+    // Si el tipo cambia, desomitir otros tipos en runtime
+    if (ultimoTipoDetectado && ultimoTipoDetectado !== tipo) {
+      resetOmisionesAlCambiarTipo(tipo);
     }
 
     // Construcción de aviso
@@ -109,7 +172,7 @@ document.addEventListener("input", async (event) => {
   }
 });
 
-// ========= Detecciones / ejemplos / enmascarado (igual que antes) =========
+// ========= Detecciones / ejemplos / enmascarado =========
 function detectarTipoDato(texto) {
   texto = (texto || "").toLowerCase();
   if (/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/.test(texto)) return "correo";
@@ -118,6 +181,7 @@ function detectarTipoDato(texto) {
   if (/\b([a-záéíóúñ]{2,}\s){1,}[a-záéíóúñ]{2,}\b/.test(texto)) return "nombre";
   return "ninguno";
 }
+
 function detectarMatches(texto, tipo) {
   if (!texto) return [];
   let re;
@@ -125,11 +189,12 @@ function detectarMatches(texto, tipo) {
     case "correo":  re = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi; break;
     case "dni":     re = /\b\d{8}\b/g; break;
     case "tarjeta": re = /\b(?:\d[ -]*?){13,16}\b/g; break;
-    case "nombre":  re = /\b([a-záéíóúñ]{2,}\s){1,}[a-záéíóúñ]{2,}\b/gi; break;
+    case "nombre":  break; // sin match para nombre completo por ahora
     default: return [];
   }
-  return texto.match(re) || [];
+  return re ? (texto.match(re) || []) : [];
 }
+
 function mensajesPorTipo(tipo) {
   switch (tipo) {
     case "correo":
@@ -144,15 +209,17 @@ function mensajesPorTipo(tipo) {
       return { vulnerabilidad: "Dato potencialmente sensible detectado.", recomendacion: "Evita compartir información personal en espacios públicos." };
   }
 }
+
 function ejemplosEnmascarados(tipo) {
   switch (tipo) {
     case "correo":  return ["j***@correo.com", "m*****.p****@dominio.pe", "u*****+promo@ejemplo.org"];
     case "dni":     return ["******12", "*****834", "******90"];
     case "tarjeta": return ["**** **** **** 1234", "****-****-****-9876", "************4321"];
-    case "nombre":  return ["Juan P.", "M. García", "A. Rojas"];
+    case "nombre":  return [];
     default: return [];
   }
 }
+
 function enmascararValorEnInput(input, tipo) {
   if (!input || !input.value) return;
   let nuevo = input.value;
@@ -181,7 +248,7 @@ function enmascararValorEnInput(input, tipo) {
   input.value = nuevo;
 }
 
-// ========= UI del aviso (con “Omitir” usando chrome.storage) =========
+// ========= UI del aviso =========
 function limpiarAviso() {
   if (avisoActivo) {
     avisoActivo.remove();
@@ -199,7 +266,7 @@ function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
     <p style="margin:0 0 8px 0"><b>Vulnerabilidad:</b><br>${vulnerabilidad}</p>
     <p style="margin:0 0 12px 0"><b>Recomendación:</b><br>${recomendacion}</p>
 
-    <div class="acciones-inferiores" style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:8px;">
+    <div class="acciones-inferiores" id="acciones-inferiores" style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:8px;">
       <button id="btn-omitir" type="button">Omitir</button>
       <button id="btn-aceptar" type="button">Aceptar</button>
     </div>
@@ -232,7 +299,7 @@ function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
   const styleBtnBase = {
     flex: "1 1 0",
     padding: "10px 12px",
-    borderRadius: "10px",
+    borderRadius: "30px",
     border: "1px solid #dcdcdc",
     background: "#fff",
     cursor: "pointer",
@@ -244,6 +311,7 @@ function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
 
   const btnOmitir = aviso.querySelector("#btn-omitir");
   const btnAceptar = aviso.querySelector("#btn-aceptar");
+  const accionesInferiores = aviso.querySelector("#acciones-inferiores");
   const zonaExtra = aviso.querySelector("#zona-extra");
   const btnVerEjemplos = aviso.querySelector("#btn-ver-ejemplos");
   const contEjemplos = aviso.querySelector("#contenedor-ejemplos");
@@ -270,16 +338,38 @@ function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
     fontWeight: "600"
   });
 
+  // ===== AUTOCIERRE CON PAUSA POR HOVER =====
+  const AUTOCLOSE_MS = 6000; // ajusta a gusto
+  let timerId = null;
+
+  function startAutoClose() {
+    clearTimeout(timerId);
+    timerId = setTimeout(() => {
+      limpiarAviso();
+    }, AUTOCLOSE_MS);
+  }
+  function stopAutoClose() {
+    clearTimeout(timerId);
+  }
+
+  aviso.addEventListener("mouseenter", stopAutoClose);
+  aviso.addEventListener("mouseleave", startAutoClose);
+  startAutoClose();
+
+  // ===== Botón Omitir: silencio temporal por sesión/tipo/campo =====
   btnOmitir.addEventListener("click", async () => {
-    const current = await chrome.storage.local.get("omitidos");
-    const set = new Set(current.omitidos || []);
-    set.add(tipo);
-    await chrome.storage.local.set({ omitidos: Array.from(set) });
+    omitidosRuntime.set(tipo, {
+      until: Date.now() + OMIT_MS,
+      sesion: sesionEntrada,
+      input: ultimoTarget
+    });
     limpiarAviso();
   });
 
+  // ===== Botón Aceptar: mostrar extras y ocultar botones =====
   btnAceptar.addEventListener("click", () => {
     zonaExtra.style.display = "block";
+    if (accionesInferiores) accionesInferiores.style.display = "none"; // ocultar "Omitir" y "Aceptar"
     const puedeEnmascarar = ["correo", "dni", "tarjeta"].includes(tipo) && ultimosMatches.length > 0;
     zonaEnmascarar.style.display = puedeEnmascarar ? "block" : "none";
   });
