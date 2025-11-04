@@ -3,7 +3,7 @@
   "name": "Detector de Exposición de Datos",
   "version": "1.0",
   "description": "Analiza páginas web y detecta posibles exposiciones de datos personales.",
-  "permissions": ["activeTab", "scripting","notifications"],
+  "permissions": ["activeTab", "scripting","notifications","tabs"],
   "host_permissions": [
     "http://127.0.0.1/*",
     "http://localhost/*"
