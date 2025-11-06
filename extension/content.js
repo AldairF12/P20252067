@@ -1,17 +1,23 @@
-// content.js
-
 // =================== Estado global ===================
-let avisoActivo = null;
+let avisoActivo = null;            // nodo del aviso (singleton)
 let ultimoTipoDetectado = null;
 let ultimosMatches = [];
 let ultimoTarget = null;
+
+// Timers globales
+let autoCloseTimerId = null;
+let postAceptarTimerId = null;
+let inputDebounceId = null;
+let hardCloseTimerId = null;
+const HARD_MAX_MS = 15000; // tope duro 15s
+let lastCopyNoticeAt = 0;
+const COPY_COOLDOWN_MS = 2000; // evita spam por múltiples copy seguidos
 
 // ====== Cache de ajustes (se actualiza en caliente) ======
 const state = {
   activo: true,
   paginas: { steam: true, roblox: true, epic: true, discord: true },
   tipos: { correo: true, nombre: true, tarjeta: true, dni: true },
-  // omitidos ya no se usa para omisiones permanentes, se ignora
   omitidos: []
 };
 
@@ -20,12 +26,10 @@ async function loadSettings() {
   if (typeof s.activo === "boolean") state.activo = s.activo;
   if (s.paginas) state.paginas = { ...state.paginas, ...s.paginas };
   if (s.tipos) state.tipos = { ...state.tipos, ...s.tipos };
-  // mantenemos lectura para compatibilidad, pero no se usa para omitir
   if (Array.isArray(s.omitidos)) state.omitidos = s.omitidos;
 }
 loadSettings();
 
-// Escuchar cambios desde popup/background y actualizar cache
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.activo) state.activo = changes.activo.newValue;
   if (changes.paginas) state.paginas = { ...state.paginas, ...changes.paginas.newValue };
@@ -42,74 +46,180 @@ function paginaKeyFromLocation() {
   if (h.endsWith("discord.com")) return "discord";
   return null;
 }
-
 function paginaHabilitada() {
   const key = paginaKeyFromLocation();
-  if (!key) return false; // seguridad extra
+  if (!key) return false;
   return !!state.paginas[key];
 }
 
 // =================== Omisión temporal (runtime) ===================
-// Silencia avisos por tipo solo durante la "sesión" actual de escritura
-// y/o por un tiempo N milisegundos. También puede atarse al input actual.
-const OMIT_MS = 15000; // 15s de silencio tras "Omitir" (ajústalo)
-let sesionEntrada = 0; // id incremental por flujo/target actual
-const omitidosRuntime = new Map();
-// Estructura: omitidosRuntime.set(tipo, { until, sesion, input })
+const OMIT_MS = 30000; // 30s
+let sesionEntrada = 0;
+const omitidosRuntime = new Map(); // tipo -> { until, sesion, input }
 
 function nuevaSesion(target) {
   sesionEntrada += 1;
   ultimoTarget = target || ultimoTarget;
-  // Al iniciar nueva sesión, limpiamos omisiones que estaban atadas
   for (const [tipo, info] of omitidosRuntime.entries()) {
-    if (info.sesion !== sesionEntrada) {
-      omitidosRuntime.delete(tipo);
-    }
+    if (info.sesion !== sesionEntrada) omitidosRuntime.delete(tipo);
   }
+  ignoradosUnicos = new Set(); // reinicia ignorados únicos por sesión
   return sesionEntrada;
 }
-
 function silenciadoPorOmitir(tipo, target) {
   const info = omitidosRuntime.get(tipo);
   if (!info) return false;
   const ahora = Date.now();
-  // Expiró el tiempo
   if (info.until && info.until < ahora) {
     omitidosRuntime.delete(tipo);
     return false;
   }
-  // Atado al mismo input
   if (info.input && target && info.input !== target) return false;
-  // Requiere misma sesión
   if (info.sesion !== sesionEntrada) return false;
   return true;
 }
-
 function resetOmisionesAlCambiarTipo(tipoActual) {
   for (const [tipo] of omitidosRuntime.entries()) {
     if (tipo !== tipoActual) omitidosRuntime.delete(tipo);
   }
 }
 
-// =================== Evento principal ===================
-document.addEventListener("input", async (event) => {
+// =================== Historial (mínimo requerido) ===================
+const HIST_KEY = "historialAvisos";
+let ignoradosUnicos = new Set(); // `${sesionEntrada}:${tipo}`
+let avisoPendiente = null;        // { tipo, sesion, actionTomada: boolean }
+
+async function guardarHistorialEntrada({ tipo, accion }) {
+  try {
+    const entry = {
+      accion,                       // "aceptar" | "omitir" | "ignorar"
+      ts: new Date().toISOString(), // para ordenar
+      tipo,                         // dni|correo|nombre|tarjeta
+      url: location.href
+    };
+    const store = await chrome.storage.local.get(HIST_KEY);
+    const arr = Array.isArray(store[HIST_KEY]) ? store[HIST_KEY] : [];
+    arr.push(entry);
+    await chrome.storage.local.set({ [HIST_KEY]: arr });
+  } catch (e) {
+    console.warn("No se pudo guardar historial:", e);
+  }
+}
+
+// --- Helper robusto para registrar acción y cerrar sin crash ---
+let _cerrandoAviso = false;
+async function registrarAccionYCerrar(accion, { forceClose = false } = {}) {
+  if (_cerrandoAviso) return;
+  _cerrandoAviso = true;
+  try {
+    const pend = avisoPendiente; // snapshot
+    if (pend && !pend.actionTomada) {
+      pend.actionTomada = true;
+      await guardarHistorialEntrada({ tipo: pend.tipo, accion });
+    }
+  } catch (e) {
+    console.warn("registrarAccionYCerrar error:", e);
+  } finally {
+    limpiarAviso({ respectHover: !forceClose });
+    _cerrandoAviso = false;
+  }
+}
+
+// =================== Evento principal (con debounce) ===================
+document.addEventListener("input", (event) => {
+  clearTimeout(inputDebounceId);
+  inputDebounceId = setTimeout(() => onUserInput(event), 250);
+});
+
+document.addEventListener("copy", async (event) => {
+  try {
+    if (!state.activo || !paginaHabilitada()) return;
+
+    // evita password fields
+    const activeEl = document.activeElement;
+    const isPwd = activeEl && activeEl.tagName === "INPUT" && activeEl.type === "password";
+    if (isPwd) return;
+
+    // cooldown
+    const now = Date.now();
+    if (now - lastCopyNoticeAt < COPY_COOLDOWN_MS) return;
+    lastCopyNoticeAt = now;
+
+    // obtener texto copiado
+    let texto = "";
+    if (event.clipboardData) {
+      // lo que va a ir al portapapeles (si la página lo setea)
+      texto = event.clipboardData.getData("text/plain") || "";
+    }
+    if (!texto) {
+      // fallback: selección visible
+      texto = (window.getSelection()?.toString() || "").trim();
+    }
+    if (!texto || texto.length < 5) return; // ignora cosas muy cortas
+
+    // mantener la misma noción de sesión/target (no forzamos nueva sesión)
+    // pero podrías hacer nuevaSesion(activeEl) si deseas separar flujos.
+
+    // pedir al backend
+    const response = await fetch("http://127.0.0.1:5000/analizar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ texto })
+    });
+    const data = await response.json();
+
+    const expone = !!data?.expone;
+    let tipo = data?.tipo || "";
+    if (expone && (!tipo || !state.tipos?.[tipo])) {
+      tipo = detectarTipoDato(texto); // fallback local
+    }
+
+    // cierres inmediatos si no aplica
+    if (!expone || !tipo || tipo === "ninguno") {
+      limpiarAviso({ respectHover: false });
+      return;
+    }
+    if (!state.tipos?.[tipo]) {
+      limpiarAviso({ respectHover: false });
+      return;
+    }
+    if (silenciadoPorOmitir(tipo, activeEl)) {
+      limpiarAviso({ respectHover: false });
+      return;
+    }
+
+    if (ultimoTipoDetectado && ultimoTipoDetectado !== tipo) {
+      resetOmisionesAlCambiarTipo(tipo);
+    }
+
+    ultimosMatches = detectarMatches(texto, tipo);
+    const { vulnerabilidad, recomendacion } = mensajesPorTipo(tipo);
+    ultimoTipoDetectado = tipo;
+    const titulo = `⚠ ${tipo.toUpperCase()} detectado (copiado)`;
+
+    // Reemplazo: cerrar aunque haya hover para evitar superposición
+    mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo });
+
+  } catch (e) {
+    console.warn("copy-listener error:", e);
+  }
+});
+
+
+async function onUserInput(event) {
   const target = event.target;
 
-  // Extensión desactivada o página no habilitada => no hacemos nada
   if (!state.activo || !paginaHabilitada()) return;
-
-  // Sólo inputs y textareas
   if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA") return;
 
   const texto = (target.value || "").trim();
   if (texto.length < 10) {
-    // si borró casi todo, resetea sesión para no “arrastrar” omisiones
     if (ultimoTarget !== target) nuevaSesion(target);
-    limpiarAviso();
+    // Cierre inmediato aunque esté en hover (ya no expone)
+    limpiarAviso({ respectHover: false });
     return;
   }
 
-  // Si cambiaste de input, inicia nueva sesión
   if (ultimoTarget !== target) {
     nuevaSesion(target);
   }
@@ -122,79 +232,71 @@ document.addEventListener("input", async (event) => {
     });
 
     const data = await response.json();
-    const expone = data?.prediccion
-      ? data.prediccion === "Expone datos personales"
-      : (data?.tipo && data.tipo !== "ninguno");
 
-    let tipo = data?.tipo;
-    if (!tipo || tipo === "otro") {
-      tipo = detectarTipoDato(texto);
+    // Backend minimal: { expone: boolean, tipo: "dni"|"correo"|"nombre"|"tarjeta"|null }
+    const expone = !!data?.expone;
+    let tipo = data?.tipo || "";
+    if (expone && (!tipo || !state.tipos?.[tipo])) {
+      tipo = detectarTipoDato(texto); // fallback local
     }
 
     // DEBUG
-    console.log("\n");
-    console.log("RESPONSE: ", data);
-    console.log("TIPO DE DATO DETECTADO: ", tipo);
-    console.log("OMITIDOS RUNTIME: ", omitidosRuntime);
+    console.log("[BACKEND]", data, "| expone:", expone, "| tipo:", tipo);
 
-    // Si no expone o tipo 'ninguno' => limpiar y salir
-    if (!expone || tipo === "ninguno") {
-      limpiarAviso();
+    // Cierres que deben ser inmediatos (ignoran hover)
+    if (!expone || !tipo || tipo === "ninguno") {
+      limpiarAviso({ respectHover: false });
       return;
     }
-
-    // Si el tipo no está habilitado por el usuario => salir
-    if (!state.tipos[tipo]) {
-      limpiarAviso();
+    if (!state.tipos?.[tipo]) {
+      limpiarAviso({ respectHover: false });
       return;
     }
-
-    // NUEVO: omisión temporal por sesión/tiempo/campo
     if (silenciadoPorOmitir(tipo, target)) {
-      limpiarAviso();
+      limpiarAviso({ respectHover: false });
       return;
     }
 
-    // Si el tipo cambia, desomitir otros tipos en runtime
     if (ultimoTipoDetectado && ultimoTipoDetectado !== tipo) {
       resetOmisionesAlCambiarTipo(tipo);
     }
 
-    // Construcción de aviso
+    ultimosMatches = detectarMatches(texto, tipo);
     const { vulnerabilidad, recomendacion } = mensajesPorTipo(tipo);
     ultimoTipoDetectado = tipo;
-    ultimosMatches = detectarMatches(texto, tipo);
+    const titulo = `⚠ ${tipo.toUpperCase()} detectado`;
 
-    mostrarAviso("⚠ Aviso", vulnerabilidad, recomendacion, { tipo });
+    // Reemplazo: cerramos aunque el mouse esté encima (evita superposiciones)
+    mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo });
 
   } catch (err) {
     console.error("Error al conectar con el backend:", err);
   }
-});
+}
 
 // ========= Detecciones / ejemplos / enmascarado =========
 function detectarTipoDato(texto) {
   texto = (texto || "").toLowerCase();
-  if (/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/.test(texto)) return "correo";
-  if (/\b\d{8}\b/.test(texto)) return "dni";
-  if (/\b(?:\d[ -]*?){13,16}\b/.test(texto)) return "tarjeta";
-  if (/\b([a-záéíóúñ]{2,}\s){1,}[a-záéíóúñ]{2,}\b/.test(texto)) return "nombre";
+  if (/\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b/.test(texto)) return "correo";
+  if (/\b\d{7,9}\b/.test(texto)) return "dni";
+  if (/\b(?:\d[ \-]?){13,19}\b/.test(texto)) return "tarjeta";
+  if (/\b(?!.*[@\d])([A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}){1,3})\b/.test(texto)) return "nombre";
   return "ninguno";
 }
-
 function detectarMatches(texto, tipo) {
   if (!texto) return [];
   let re;
   switch (tipo) {
-    case "correo":  re = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi; break;
-    case "dni":     re = /\b\d{8}\b/g; break;
-    case "tarjeta": re = /\b(?:\d[ -]*?){13,16}\b/g; break;
-    case "nombre":  break; // sin match para nombre completo por ahora
+    case "correo":  re = /\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b/gi; break;
+    case "dni":     re = /\b\d{7,9}\b/g; break;
+    case "tarjeta": re = /\b(?:\d[ \-]?){13,19}\b/g; break; // sin Luhn aquí
+    case "nombre":
+      re = /\b(?!.*[@\d])([A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}){1,3})\b/gi;
+      break;
     default: return [];
   }
   return re ? (texto.match(re) || []) : [];
 }
-
 function mensajesPorTipo(tipo) {
   switch (tipo) {
     case "correo":
@@ -209,7 +311,6 @@ function mensajesPorTipo(tipo) {
       return { vulnerabilidad: "Dato potencialmente sensible detectado.", recomendacion: "Evita compartir información personal en espacios públicos." };
   }
 }
-
 function ejemplosEnmascarados(tipo) {
   switch (tipo) {
     case "correo":  return ["j***@correo.com", "m*****.p****@dominio.pe", "u*****+promo@ejemplo.org"];
@@ -219,25 +320,24 @@ function ejemplosEnmascarados(tipo) {
     default: return [];
   }
 }
-
 function enmascararValorEnInput(input, tipo) {
   if (!input || !input.value) return;
   let nuevo = input.value;
   switch (tipo) {
     case "correo":
-      nuevo = nuevo.replace(/[a-z0-9._%+-]+@/gi, (m) => {
+      nuevo = nuevo.replace(/[a-z0-9._%+\-]+@/gi, (m) => {
         const [user] = m.split("@");
         const visible = user.slice(0, 1);
         return visible + "*".repeat(Math.max(3, user.length - 1)) + "@";
       });
       break;
     case "dni":
-      nuevo = nuevo.replace(/\b(\d{6})(\d{2})\b/g, (_, a, b) => "*".repeat(a.length) + b);
+      nuevo = nuevo.replace(/\b(\d{6})(\d{1,3})\b/g, (_, a, b) => "*".repeat(a.length) + b);
       break;
     case "tarjeta":
-      nuevo = nuevo.replace(/\b((?:\d[ -]*?){13,16})\b/g, (full) => {
+      nuevo = nuevo.replace(/\b((?:\d[ \-]?){13,19})\b/g, (full) => {
         const digits = full.replace(/\D/g, "");
-        const masked = "*".repeat(digits.length - 4) + digits.slice(-4);
+        const masked = "*".repeat(Math.max(0, digits.length - 4)) + digits.slice(-4);
         return masked.replace(/(.{4})/g, "$1 ").trim();
       });
       break;
@@ -248,22 +348,69 @@ function enmascararValorEnInput(input, tipo) {
   input.value = nuevo;
 }
 
-// ========= UI del aviso =========
-function limpiarAviso() {
+// ========= UI del aviso + historial =========
+function clearTimers() {
+  clearTimeout(autoCloseTimerId);
+  clearTimeout(postAceptarTimerId);
+  clearTimeout(hardCloseTimerId);
+  autoCloseTimerId = null;
+  postAceptarTimerId = null;
+  hardCloseTimerId = null;
+}
+
+function limpiarAviso({ respectHover = false } = {}) {
+  // No cerrar si está en hover y se pidió respetarlo (solo para autocierre)
+  if (respectHover && avisoActivo && avisoActivo.matches && avisoActivo.matches(':hover')) {
+    return;
+  }
+
+  // Ignorar (una sola vez por tipo/sesión) si el aviso se va sin acción
+  if (avisoPendiente && !avisoPendiente.actionTomada) {
+    const key = `${avisoPendiente.sesion}:${avisoPendiente.tipo}`;
+    if (!ignoradosUnicos.has(key)) {
+      ignoradosUnicos.add(key);
+      guardarHistorialEntrada({ tipo: avisoPendiente.tipo, accion: "ignorar" });
+    }
+  }
+
+  clearTimers();
+
   if (avisoActivo) {
-    avisoActivo.remove();
+    try { avisoActivo.remove(); } catch {}
     avisoActivo = null;
   }
+  avisoPendiente = null;
+}
+
+function startAutoClose() {
+  clearTimeout(autoCloseTimerId);
+  const AUTOCLOSE_MS = 6000;
+  autoCloseTimerId = setTimeout(() => limpiarAviso({ respectHover: true }), AUTOCLOSE_MS);
+
+  // Tope duro: cierre sí o sí incluso si el mouse queda eternamente encima
+  clearTimeout(hardCloseTimerId);
+  hardCloseTimerId = setTimeout(() => limpiarAviso({ respectHover: false }), HARD_MAX_MS);
+}
+function stopAutoClose() {
+  clearTimeout(autoCloseTimerId);
+  autoCloseTimerId = null;
+  // No limpiamos el tope duro: debe cumplirse sí o sí
 }
 
 function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
-  limpiarAviso();
+  // Reemplazo: cerramos aunque el mouse esté encima (evita superposiciones)
+  limpiarAviso({ respectHover: false });
 
   const aviso = document.createElement("div");
   aviso.classList.add("aviso-proteccion");
+  aviso.setAttribute("id", "aviso-proteccion");
+
+  // Tooltip para "Vulnerabilidad"
+  const tooltipIcon = `<span title="Punto débil por donde pueden robar tus datos" style="cursor:help;margin-left:6px;">🛈</span>`;
+
   aviso.innerHTML = `
     <strong style="font-size:16px;display:block;margin-bottom:6px;">${titulo}</strong>
-    <p style="margin:0 0 8px 0"><b>Vulnerabilidad:</b><br>${vulnerabilidad}</p>
+    <p style="margin:0 0 8px 0"><b>Vulnerabilidad${tooltipIcon}:</b><br>${vulnerabilidad}</p>
     <p style="margin:0 0 12px 0"><b>Recomendación:</b><br>${recomendacion}</p>
 
     <div class="acciones-inferiores" id="acciones-inferiores" style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:8px;">
@@ -293,7 +440,7 @@ function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
     boxShadow: "0 6px 16px rgba(0,0,0,0.18)",
     fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
     fontSize: "14px",
-    zIndex: "999999"
+    zIndex: "2147483647"
   });
 
   const styleBtnBase = {
@@ -305,10 +452,21 @@ function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
     cursor: "pointer",
     fontWeight: "600"
   };
+  const styleBtnAceptar = { ...styleBtnBase, background: "linear-gradient(to bottom, #D400FF, #2600FF)", color: "#fff" };
+  const styleBtnOmitir  = { ...styleBtnBase, background: "linear-gradient(to bottom, #D400FF, #FF0004)", color: "#fff" };
 
   document.body.appendChild(aviso);
   avisoActivo = aviso;
 
+  // AUTOCIERRE con pausa por hover + tope duro
+  aviso.addEventListener("mouseenter", stopAutoClose);
+  aviso.addEventListener("mouseleave", startAutoClose);
+  startAutoClose();
+
+  // Estado del aviso visible (para “ignorar” si se cierra solo)
+  avisoPendiente = { tipo, sesion: sesionEntrada, actionTomada: false };
+
+  // Bind de botones
   const btnOmitir = aviso.querySelector("#btn-omitir");
   const btnAceptar = aviso.querySelector("#btn-aceptar");
   const accionesInferiores = aviso.querySelector("#acciones-inferiores");
@@ -318,8 +476,8 @@ function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
   const zonaEnmascarar = aviso.querySelector("#zona-enmascarar");
   const btnEnmascarar = aviso.querySelector("#btn-enmascarar");
 
-  Object.assign(btnOmitir.style, styleBtnBase, { background: "#fafafa" });
-  Object.assign(btnAceptar.style, styleBtnBase, { background: "#ffef9f", borderColor: "#f2d241" });
+  Object.assign(btnOmitir.style, styleBtnOmitir, { border: "none" });
+  Object.assign(btnAceptar.style, styleBtnAceptar, { border: "none" });
 
   Object.assign(btnVerEjemplos.style, {
     padding: "10px 12px",
@@ -338,40 +496,44 @@ function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
     fontWeight: "600"
   });
 
-  // ===== AUTOCIERRE CON PAUSA POR HOVER =====
-  const AUTOCLOSE_MS = 6000; // ajusta a gusto
-  let timerId = null;
+  // Omitir (robusto)
+  btnOmitir.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    stopAutoClose();
 
-  function startAutoClose() {
-    clearTimeout(timerId);
-    timerId = setTimeout(() => {
-      limpiarAviso();
-    }, AUTOCLOSE_MS);
-  }
-  function stopAutoClose() {
-    clearTimeout(timerId);
-  }
-
-  aviso.addEventListener("mouseenter", stopAutoClose);
-  aviso.addEventListener("mouseleave", startAutoClose);
-  startAutoClose();
-
-  // ===== Botón Omitir: silencio temporal por sesión/tipo/campo =====
-  btnOmitir.addEventListener("click", async () => {
     omitidosRuntime.set(tipo, {
       until: Date.now() + OMIT_MS,
       sesion: sesionEntrada,
       input: ultimoTarget
     });
-    limpiarAviso();
+
+    await registrarAccionYCerrar("omitir", { forceClose: true });
   });
 
-  // ===== Botón Aceptar: mostrar extras y ocultar botones =====
-  btnAceptar.addEventListener("click", () => {
+  // Aceptar (robusto)
+  btnAceptar.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    stopAutoClose();
+
+    const pend = avisoPendiente;
+    if (pend && !pend.actionTomada) {
+      pend.actionTomada = true;
+      await guardarHistorialEntrada({ tipo, accion: "aceptar" });
+    }
+
     zonaExtra.style.display = "block";
-    if (accionesInferiores) accionesInferiores.style.display = "none"; // ocultar "Omitir" y "Aceptar"
+    if (accionesInferiores) accionesInferiores.style.display = "none";
+
     const puedeEnmascarar = ["correo", "dni", "tarjeta"].includes(tipo) && ultimosMatches.length > 0;
     zonaEnmascarar.style.display = puedeEnmascarar ? "block" : "none";
+
+    // Cierre de cortesía 5s después de aceptar si no tocan nada más
+    clearTimeout(postAceptarTimerId);
+    postAceptarTimerId = setTimeout(() => {
+      limpiarAviso({ respectHover: false });
+    }, 5000);
   });
 
   btnVerEjemplos.addEventListener("click", () => {
@@ -389,7 +551,7 @@ function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
       ok.textContent = "✅ Datos enmascarados en el campo.";
       Object.assign(ok.style, { marginTop: "8px", fontSize: "13px", color: "#0a7a36", fontWeight: "600" });
       aviso.appendChild(ok);
-      setTimeout(() => limpiarAviso(), 2500);
+      setTimeout(() => limpiarAviso({ respectHover: false }), 2000);
     }
   });
 }

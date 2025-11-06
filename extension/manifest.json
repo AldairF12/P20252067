@@ -3,7 +3,7 @@
   "name": "Detector de Exposición de Datos",
   "version": "1.0",
   "description": "Analiza páginas web y detecta posibles exposiciones de datos personales.",
-  "permissions": ["activeTab", "scripting","notifications","tabs"],
+  "permissions": ["activeTab", "scripting", "notifications", "storage", "tabs"],
   "host_permissions": [
     "http://127.0.0.1/*",
     "http://localhost/*"
@@ -22,8 +22,8 @@
         "https://www.roblox.com/*",
         "https://www.epicgames.com/*",
         "https://discord.com/*",
-        "https://steamcommunity.com/"
-        ],
+        "https://steamcommunity.com/*"
+      ],
       "js": ["content.js"]
     }
   ]
