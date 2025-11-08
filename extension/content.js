@@ -21,6 +21,95 @@ const state = {
   omitidos: []
 };
 
+// --- HU08: Config y estado por formulario/section ---
+const FORM_COOLDOWN_MS = 60000; // 60s
+const formLastShown = new WeakMap(); // WeakMap<Element, number>
+
+// Palabras clave por categoría
+const KW = {
+  correo:    /\b(correo|e-?mail|email)\b/i,
+  dni:       /\b(dni|documento|c[eé]dula|id\s*nacional|nro\s*doc)\b/i,
+  tarjeta:   /\b(tarjeta|credit|debit|cvv|cvc|n[uú]mero\s*de\s*tarjeta|pan)\b/i,
+  nombre:    /\b(nombre(?:\s+real)?|name|nombres|apellidos|apellido)\b/i,
+  telefono:  /\b(t[eé]lefono|cel(ular)?|m[oó]vil|whats?app|phone|n[uú]mero\s*de\s*tel[eé]fono)\b/i,
+  ubicacion: /\b(ubicaci[oó]n|pa[ií]s|ciudad|direcci[oó]n|address|location|provincia|regi[oó]n)\b/i,
+};
+
+// categorías que cuentan para el umbral
+const CATEGORIAS_SENSIBLES = ["correo", "dni", "tarjeta", "nombre", "telefono"];
+
+// Intenta extraer texto semántico de un “campo” (input real o pseudo-input)
+function textoCampoPlus(el) {
+  const acc = [];
+
+  // Caso general: label[for], label ascendente, aria/placeholder/name/id
+  try {
+    if (el.id) {
+      const byFor = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      if (byFor) acc.push(byFor.textContent || "");
+    }
+    const labUp = el.closest("label");
+    if (labUp) acc.push(labUp.textContent || "");
+    for (const a of ["aria-label", "placeholder"]) {
+      const v = el.getAttribute?.(a);
+      if (v) acc.push(v);
+    }
+    if (el.name) acc.push(el.name);
+    if (el.id) acc.push(el.id);
+
+    // Hermanos cercanos con texto breve
+    const prev = el.previousElementSibling;
+    if (prev && prev.textContent && prev.textContent.length < 200) acc.push(prev.textContent);
+
+    // Padre con poco texto (evita contenedores gigantes)
+    const parent = el.parentElement;
+    if (parent && parent.textContent && parent.textContent.length < 300) {
+      acc.push(parent.textContent);
+    }
+  } catch {}
+
+  // Caso Steam: label visual en .DialogLabel cerca del input/botón
+  try {
+    const steamLabel = el.closest("label")?.querySelector(".DialogLabel");
+    if (steamLabel) acc.push(steamLabel.textContent || "");
+    const steamAround = el.closest(".DialogInputLabelGroup, .DialogInput_Wrapper, ._DialogLayout");
+    if (steamAround) {
+      const lab = steamAround.querySelector(".DialogLabel");
+      if (lab) acc.push(lab.textContent || "");
+    }
+  } catch {}
+
+  // Caso Roblox: bloques con .account-info-inline-label (no hay input editable hasta hacer click)
+  try {
+    const robloxField = el.closest(".account-settings-text-field");
+    if (robloxField) {
+      const robloxLabel = robloxField.querySelector(".account-info-inline-label");
+      if (robloxLabel) acc.push(robloxLabel.textContent || "");
+    }
+    // También hay secciones con H2
+    const robloxSection = el.closest(".setting-section");
+    if (robloxSection) {
+      const h2 = robloxSection.querySelector(".setting-section-header");
+      if (h2) acc.push(h2.textContent || "");
+    }
+  } catch {}
+
+  return (acc.join(" ") || "").trim();
+}
+
+// Clasifica texto a categoría
+function clasificarCategoriaPorTexto(t) {
+  if (!t) return null;
+  if (KW.correo.test(t)) return "correo";
+  if (KW.dni.test(t)) return "dni";
+  if (KW.tarjeta.test(t)) return "tarjeta";
+  if (KW.nombre.test(t)) return "nombre";
+  if (KW.telefono.test(t)) return "telefono";
+  if (KW.ubicacion.test(t)) return "ubicacion";
+  return null;
+}
+
+
 async function loadSettings() {
   const s = await chrome.storage.local.get(["activo", "paginas", "tipos", "omitidos"]);
   if (typeof s.activo === "boolean") state.activo = s.activo;
@@ -205,6 +294,115 @@ document.addEventListener("copy", async (event) => {
   }
 });
 
+// --- HU08: Escáner de formularios/sections con múltiples datos sensibles ---
+let scanFormsDebounceId = null;
+
+function scheduleScanForms() {
+  clearTimeout(scanFormsDebounceId);
+  scanFormsDebounceId = setTimeout(scanFormsForSensitive, 500);
+}
+
+function elementosTipoCampoEn(container) {
+  // Inputs clásicos
+  const basics = Array.from(container.querySelectorAll("input, textarea, select"));
+
+  // Pseudo-inputs: botones/combobox, inputs de Steam, contenteditable
+  const pseudo = Array.from(container.querySelectorAll(
+    `[role="combobox"], button[role="combobox"], [contenteditable="true"]`
+  ));
+
+  // Campos “visualizados” de Roblox (sin input editable hasta pulsar el “editar”)
+  const robloxBlocks = Array.from(container.querySelectorAll(".account-settings-text-field, .settings-text-lines-container"));
+
+  // Devuelve mezcla única
+  const set = new Set([...basics, ...pseudo, ...robloxBlocks]);
+  return Array.from(set);
+}
+
+function contarCategoriasSensiblesEn(container) {
+  const tiposDetectados = new Set();
+
+  // Recorre cada “campo” real o virtual
+  for (const el of elementosTipoCampoEn(container)) {
+    // Evitar passwords reales
+    if (el.tagName === "INPUT" && el.type && el.type.toLowerCase() === "password") continue;
+
+    const t = textoCampoPlus(el);
+    const cat = clasificarCategoriaPorTexto(t);
+    if (cat) tiposDetectados.add(cat);
+  }
+
+  // Fallback: también escanea headers/labels de la sección
+  const textoSeccion = (container.textContent || "").slice(0, 2000); // recorta por rendimiento
+  for (const [cat, re] of Object.entries(KW)) {
+    if (re.test(textoSeccion)) tiposDetectados.add(cat);
+  }
+
+  // Cuenta solo categorías sensibles (umbral)
+  const sensiblesCount = Array.from(tiposDetectados).filter(c => CATEGORIAS_SENSIBLES.includes(c)).length;
+  return { sensiblesCount, tiposDetectados };
+}
+
+function scanFormsForSensitive() {
+  if (!state.activo || !paginaHabilitada()) return;
+
+  // Considera <form>, secciones de Steam, y secciones de Roblox
+  const candidates = new Set([
+    ...document.querySelectorAll("form"),
+    ...document.querySelectorAll(".DialogInputLabelGroup, ._DialogLayout, .uwqwoAlIVWyJ8l71i77-i, ._3s6BBoF1hXm0yeOzoVsAQj"),
+    ...document.querySelectorAll(".setting-section, #settings-container, #rbx-account-info-header")
+  ]);
+
+  for (const container of candidates) {
+    try {
+      const last = formLastShown.get(container) || 0;
+      if (Date.now() - last < FORM_COOLDOWN_MS) continue;
+
+      const { sensiblesCount, tiposDetectados } = contarCategoriasSensiblesEn(container);
+      if (sensiblesCount >= 2) {
+        // Respeta omisión temporal por tipo “multiple_campos”
+        if (silenciadoPorOmitir("multiple_campos", container)) continue;
+
+        const lista = Array.from(tiposDetectados).join(", ");
+        const vulnerabilidad = `Este formulario solicita **múltiples datos sensibles**: ${lista}.`;
+        const recomendacion = "Revisa la política del sitio y comparte solo lo necesario. Evita pegar datos en chats públicos.";
+
+        const titulo = "⚠ Formulario solicita múltiples datos sensibles";
+        ultimoTipoDetectado = "multiple_campos";
+        ultimosMatches = [];
+
+        mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo: "multiple_campos" });
+        formLastShown.set(container, Date.now());
+      }
+    } catch { /* noop */ }
+  }
+}
+
+// Observer para páginas dinámicas (React/Vue): Roblox/Steam/Discord
+const mo = new MutationObserver(() => scheduleScanForms());
+mo.observe(document.documentElement, { childList: true, subtree: true });
+
+// Triggers extra por SPA: hashchange y navegación por botones
+window.addEventListener("hashchange", scheduleScanForms, true);
+window.addEventListener("click", (e) => {
+  // al abrir editores “Cambiar/Editar”, reescanea
+  const t = e.target;
+  if (!t) return;
+  const txt = (t.textContent || "").toLowerCase();
+  if (txt.includes("editar") || txt.includes("cambiar") || txt.includes("actualizar") || txt.includes("save") || txt.includes("guardar")) {
+    scheduleScanForms();
+  }
+}, true);
+
+// Primer escaneo
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", scheduleScanForms);
+} else {
+  scheduleScanForms();
+}
+
+
+
 
 async function onUserInput(event) {
   const target = event.target;
@@ -307,6 +505,8 @@ function mensajesPorTipo(tipo) {
       return { vulnerabilidad: "Posible número de tarjeta detectado.", recomendacion: "No escribas números de tarjeta en ningún campo de texto no seguro." };
     case "nombre":
       return { vulnerabilidad: "Exposición de nombre.", recomendacion: "Evita publicar tu nombre completo en foros o juegos públicos." };
+    case "multiple_campos": // <--- NUEVO
+      return { vulnerabilidad: "Este formulario solicita múltiples datos sensibles.", recomendacion: "Revisa la política del sitio y comparte solo lo necesario." };
     default:
       return { vulnerabilidad: "Dato potencialmente sensible detectado.", recomendacion: "Evita compartir información personal en espacios públicos." };
   }
@@ -526,7 +726,7 @@ function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
     zonaExtra.style.display = "block";
     if (accionesInferiores) accionesInferiores.style.display = "none";
 
-    const puedeEnmascarar = ["correo", "dni", "tarjeta"].includes(tipo) && ultimosMatches.length > 0;
+    const puedeEnmascarar = ["correo", "dni", "tarjeta"].includes(tipo) && ultimosMatches.length > 0 && tipo !== "multiple_campos";
     zonaEnmascarar.style.display = puedeEnmascarar ? "block" : "none";
 
     // Cierre de cortesía 5s después de aceptar si no tocan nada más
@@ -554,4 +754,179 @@ function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
       setTimeout(() => limpiarAviso({ respectHover: false }), 2000);
     }
   });
+}
+
+
+// =================== HU23: Recordatorio al cerrar sesión ===================
+
+// =================== HU23 (simple por clic y 4 sitios) ===================
+
+const HU23_PENDING_KEY = "HU23_PENDING_BANNER";
+
+// Sitios soportados (host y pistas de logout por href/texto)
+const HU23_SITES = [
+  {
+    key: "steam",
+    hosts: ["steampowered.com", "steamcommunity.com"],
+    hrefHints: ["/logout"], // ej: https://store.steampowered.com/logout/
+    textHints: ["cerrar sesión","cerrar sesion","logout","log out","sign out","logoff"]
+  },
+  {
+    key: "roblox",
+    hosts: ["roblox.com"],
+    hrefHints: ["/logout","/auth/logout"],
+    textHints: ["cerrar sesión","cerrar sesion","logout","log out","sign out"]
+  },
+  {
+    key: "epic",
+    hosts: ["epicgames.com"],
+    hrefHints: ["/logout","/log-out","/signout"],
+    textHints: ["cerrar sesión","cerrar sesion","logout","log out","sign out"]
+  },
+  {
+    key: "discord",
+    hosts: ["discord.com"],
+    hrefHints: ["/logout"], // a veces no navega; nos apoyamos también en texto
+    textHints: ["cerrar sesión","cerrar sesion","logout","log out","sign out"]
+  }
+];
+
+function hu23_siteMatch() {
+  const h = location.hostname;
+  for (const s of HU23_SITES) {
+    if (s.hosts.some(dom => h.endsWith(dom))) return s;
+  }
+  return null;
+}
+
+async function hu23_sessionGet(keys) {
+  try { if (chrome.storage?.session) return await chrome.storage.session.get(keys); } catch {}
+  return await chrome.storage.local.get(keys);
+}
+async function hu23_sessionSet(obj) {
+  try { if (chrome.storage?.session) return await chrome.storage.session.set(obj); } catch {}
+  return await chrome.storage.local.set(obj);
+}
+async function hu23_sessionRemove(keys) {
+  try { if (chrome.storage?.session) return await chrome.storage.session.remove(keys); } catch {}
+  return await chrome.storage.local.remove(keys);
+}
+
+// Marca “pendiente de mostrar” por si hay navegación inmediata
+async function hu23_markPending() {
+  const payload = { ts: Date.now(), host: location.hostname };
+  await hu23_sessionSet({ [HU23_PENDING_KEY]: payload });
+}
+
+// Si hay pendiente (máx 30s), re-muestra el banner al cargar la nueva página
+async function hu23_checkPendingAndShow() {
+  const store = await hu23_sessionGet(HU23_PENDING_KEY);
+  const pending = store?.[HU23_PENDING_KEY];
+  if (!pending) return;
+  if (Date.now() - (pending.ts || 0) > 30000) {
+    await hu23_sessionRemove(HU23_PENDING_KEY);
+    return;
+  }
+  hu23_showBanner();
+  await hu23_sessionRemove(HU23_PENDING_KEY);
+}
+
+// UI del banner
+let hu23BannerEl = null;
+function hu23_removeBanner() {
+  if (hu23BannerEl) { hu23BannerEl.remove(); hu23BannerEl = null; }
+}
+
+function hu23_showBanner() {
+  hu23_removeBanner();
+
+  const host = location.hostname;
+  const el = document.createElement("div");
+  el.setAttribute("role","dialog");
+  el.setAttribute("aria-live","polite");
+  Object.assign(el.style, {
+    position: "fixed",
+    left: "50%",
+    bottom: "24px",
+    transform: "translateX(-50%)",
+    maxWidth: "520px",
+    width: "calc(100% - 40px)",
+    background: "#0f172a",
+    color: "#fff",
+    padding: "14px 16px",
+    border: "1px solid rgba(255,255,255,.15)",
+    borderRadius: "12px",
+    boxShadow: "0 10px 24px rgba(0,0,0,.35)",
+    zIndex: "2147483647",
+    fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
+    fontSize: "14px"
+  });
+  el.innerHTML = `
+    <div style="display:flex;gap:12px;align-items:flex-start;">
+      <div style="font-size:18px;line-height:1;">🔒</div>
+      <div style="flex:1;">
+        <div style="font-weight:700;font-size:15px;margin-bottom:6px;">
+          Limpia autocompletado y cookies
+        </div>
+        <div style="opacity:.95;line-height:1.45;margin-bottom:10px;">
+          Has cerrado sesión en <b>${host}</b>. Te recomendamos limpiar datos del sitio para proteger tu privacidad.
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button id="hu23-btn-clean" type="button"
+            style="flex:1 0 180px;padding:9px 12px;border:none;border-radius:10px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer;">
+            Limpiar ahora
+          </button>
+          <button id="hu23-btn-close" type="button"
+            style="flex:1 0 120px;padding:9px 12px;border:1px solid #334155;border-radius:10px;background:#0f172a;color:#fff;font-weight:700;cursor:pointer;">
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(el);
+  hu23BannerEl = el;
+
+  const btnClean = el.querySelector("#hu23-btn-clean");
+  const btnClose = el.querySelector("#hu23-btn-close");
+  btnClean.addEventListener("click", async () => {
+    try { await chrome.runtime.sendMessage({ type: "OPEN_CLEAR_SETTINGS" }); } catch {}
+    // El usuario decide cerrar; no autocerramos
+  });
+  btnClose.addEventListener("click", () => hu23_removeBanner());
+}
+
+// Heurística de logout SOLO por click (href/texto), limitada a los 4 sitios
+function hu23_isLogoutClick(target, siteCfg) {
+  if (!target || !siteCfg) return false;
+
+  // A) link con href que contiene hint
+  const a = target.closest?.("a[href]") || (target.tagName === "A" ? target : null);
+  if (a?.href) {
+    const hrefLow = a.href.toLowerCase();
+    if (siteCfg.hrefHints.some(p => hrefLow.includes(p))) return true;
+  }
+
+  // B) texto visible con hint
+  const txt = (target.innerText || target.textContent || "").trim().toLowerCase();
+  if (txt && siteCfg.textHints.some(t => txt.includes(t))) return true;
+
+  return false;
+}
+
+// Bind principal: SOLO por click y SOLO para los 4 sitios
+const hu23Site = hu23_siteMatch();
+if (hu23Site) {
+  // Mostrar si venimos de un logout que navegó
+  hu23_checkPendingAndShow().catch(()=>{});
+
+  document.addEventListener("click", (ev) => {
+    const t = ev.target;
+    if (hu23_isLogoutClick(t, hu23Site)) {
+      // Mostrar inmediatamente…
+      hu23_showBanner();
+      // …y marcar pendiente por si la página navega y perdemos el banner
+      hu23_markPending().catch(()=>{});
+    }
+  }, { capture: true });
 }
