@@ -114,7 +114,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
   render();
 
   // Botones
-  document.getElementById("btn-privacidad").addEventListener("click", openPrivacy);
+ 
   document.getElementById("btn-priv-aceptar").addEventListener("click", closePrivacy);
   document.getElementById("privacy-overlay").addEventListener("click", closePrivacy);
 
