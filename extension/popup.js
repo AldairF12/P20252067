@@ -121,6 +121,11 @@ document.getElementById("guia").addEventListener("click", () => {
   alert("📘 La extensión detecta posibles exposiciones de datos personales en las páginas habilitadas.");
 });
 
-document.getElementById("historial").addEventListener("click", () => {
-  alert("📜 Aquí se mostrará el historial de avisos detectados (aún en desarrollo).");
-});
+// Botón historial (abre la página de historial)
+  if (btnHistorial) {
+    btnHistorial.addEventListener("click", () => {
+      const url = chrome.runtime.getURL("historial/index.html");
+      chrome.tabs.create({ url });
+    });
+  }
+
