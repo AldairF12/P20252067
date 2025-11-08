@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Historial de detecciones</title>
+    <link rel="stylesheet" href="historial.css" />
+  </head>
+  <body>
+    <div class="historial">
+      <main class="main-content">
+        <!-- Columna izquierda: grupos (Hoy/Ayer/Fecha) -->
+        <section id="groups" class="groups" aria-live="polite"></section>
+
+        <!-- Columna derecha: Glosario + acciones -->
+        <aside class="side">
+          <section class="glossary" aria-label="Glosario de términos">
+            <h2 class="glossary-title">Glosario</h2>
+            <div class="glossary-body">
+              <p><strong>Vulnerabilidad:</strong> Debilidad en un sistema que puede ser aprovechada para robar o exponer información.</p>
+              <p><strong>Aviso:</strong> Notificación rápida que informa sobre un riesgo o acción en curso.</p>
+              <p><strong>Recomendación:</strong> Sugerencia del sistema para actuar de forma más segura.</p>
+              <p><strong>Enmascarar:</strong> Ocultar parte de los datos (ej.: últimos dígitos de una tarjeta).</p>
+              <p><strong>Exposición:</strong> Datos personales visibles o accesibles sin protección.</p>
+            </div>
+          </section>
+
+          <nav class="actions" aria-label="Acciones">
+            <button id="btn-privacidad" class="btn btn-plain">Privacidad</button>
+            <button id="btn-acerca" class="btn btn-plain">Acerca de</button>
+            <button id="btn-reset" class="btn btn-danger">Restablecer</button>
+          </nav>
+        </aside>
+      </main>
+    </div>
+
+    <!-- Plantillas -->
+    <template id="tpl-group">
+      <section class="group" role="region">
+        <h3 class="group-title"></h3>
+        <div class="cards"></div>
+      </section>
+    </template>
+
+    <template id="tpl-card">
+      <article class="card estado-blanco" role="article">
+        <div class="pill-row">
+          <span class="pill pill-action">Sin respuesta</span>
+          <span class="pill pill-type">TIPO</span>
+        </div>
+
+        <div class="row">
+          <div class="label">⚠️ Aviso:</div>
+          <p class="value aviso">—</p>
+        </div>
+
+        <div class="row">
+          <div class="label">⚠️ Vulnerabilidad <abbr title="Información">ⓘ</abbr>:</div>
+          <p class="value vuln">—</p>
+        </div>
+
+        <div class="row">
+          <div class="label">⚠️ Recomendación:</div>
+          <p class="value recom">—</p>
+        </div>
+
+        <div class="chip"><span class="chip-text estado-text">Sin respuesta</span></div>
+
+        <p class="link-wrap">
+          <a class="link" href="#" target="_blank" rel="noopener noreferrer">Ir al sitio web</a>
+        </p>
+      </article>
+    </template>
+
+    <!-- Modal de Privacidad -->
+    <div id="privacy-overlay" class="overlay" hidden></div>
+    <div id="privacy-modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="priv-title">
+      <div class="modal-header">
+        <h2 id="priv-title">Política de Privacidad – Extensión de Navegador</h2>
+      </div>
+      <div class="modal-body">
+        <p>La presente Política de Privacidad explica cómo nuestra extensión protege la información personal de los usuarios al momento de navegar o llenar formularios en línea.</p>
+        <p><strong>1. Recopilación de información</strong><br>
+        Nuestra extensión no almacena ni transmite datos personales a servidores externos. Solo analiza en tiempo real el contenido de los formularios y campos de texto en el navegador para identificar posibles riesgos de exposición.</p>
+        <p><strong>2. Uso de la información</strong><br>
+        La extensión utiliza la información únicamente para:</p>
+        <ul>
+          <li>Detectar campos sensibles como nombre, correo o documento de identidad.</li>
+          <li>Mostrar avisos previos cuando se detecta un riesgo de exposición de datos.</li>
+          <li>Aplicar técnicas de enmascarado, ocultando parcialmente información en campos visibles (ejemplo: mostrar solo parte de un número).</li>
+        </ul>
+        <p><strong>3. Avisos y recomendaciones</strong><br>
+        Cuando se identifique una situación de riesgo, la extensión notificará al usuario mediante un aviso claro y no intrusivo, brindando además recomendaciones sobre cómo proteger su información.</p>
+        <p><strong>4. Control del usuario</strong><br>
+        El usuario mantiene siempre el control sobre la extensión, pudiendo:</p>
+        <ul>
+          <li>Pausar o reactivar la funcionalidad en sitios específicos.</li>
+          <li>Ignorar un aviso si decide continuar bajo su propia responsabilidad.</li>
+        </ul>
+        <p><strong>5. Seguridad</strong><br>
+        La extensión está diseñada para prevenir vulnerabilidades y evitar que los datos personales se expongan sin consentimiento. No se comparte información con terceros.</p>
+        <p><strong>6. Cambios en la política</strong><br>
+        Cualquier modificación a esta política será comunicada mediante una actualización visible en la extensión.</p>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-priv-aceptar" class="btn btn-primary">Aceptar</button>
+      </div>
+    </div>
+
+    <script src="historial.js"></script>
+  </body>
+</html>
