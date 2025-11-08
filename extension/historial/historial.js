@@ -118,9 +118,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
   document.getElementById("btn-priv-aceptar").addEventListener("click", closePrivacy);
   document.getElementById("privacy-overlay").addEventListener("click", closePrivacy);
 
-  document.getElementById("btn-acerca").addEventListener("click", ()=>{
-    chrome.tabs.create({ url: chrome.runtime.getURL("popup.html") });
-  });
+ 
   document.getElementById("btn-reset").addEventListener("click", ()=>{
     if (!confirm("¿Borrar todo el historial de detecciones?")) return;
     chrome.storage.local.set({ [HIST_KEY]: [] }, render);
