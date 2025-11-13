@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Protector de datos personales</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h2 class="titulo">Protector de datos personales</h2>
+
+  <div class="interruptor-container">
+    <label for="toggle" id="estado-label">Extensión activada</label>
+    <label class="switch">
+      <input type="checkbox" id="toggle" checked>
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="opciones">
+    <div class="columna">
+      <h3>Paginas</h3>
+      <label><input type="checkbox" checked> Steam</label>
+      <label><input type="checkbox" checked> Roblox</label>
+      <label><input type="checkbox" checked> Epic Games</label>
+      <label><input type="checkbox" checked> Discord</label>
+    </div>
+    <div class="columna">
+      <h3>Tipos de datos</h3>
+      <label><input type="checkbox" checked> Correo</label>
+      <label><input type="checkbox" checked> Nombre</label>
+      <label><input type="checkbox" checked> Tarjeta</label>
+      <label><input type="checkbox" checked> DNI</label>
+    </div>
+  </div>
+
+  <div class="contador">2 avisos hoy</div>
+
+  <button id="guia">Ver guía inicial</button>
+  <button id="historial">Abrir historial</button>
+
+  <script src="popup.js"></script>
+</body>
+</html>

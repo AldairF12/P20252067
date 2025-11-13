@@ -1,30 +1,69 @@
 {
   "manifest_version": 3,
-  "name": "Detector de Exposición de Datos",
-  "version": "1.0",
-  "description": "Analiza páginas web y detecta posibles exposiciones de datos personales.",
-  "permissions": ["activeTab", "scripting", "notifications", "storage", "tabs"],
-  "host_permissions": [
-    "http://127.0.0.1/*",
-    "http://localhost/*"
+  "name": "Detector de Exposición de Datos (ONNX)",
+  "version": "2.0.0",
+  "description": "Analiza páginas web y detecta posibles exposiciones de datos personales usando un modelo DistilBERT en formato ONNX directamente en la extensión.",
+
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "notifications",
+    "storage",
+    "tabs"
   ],
+
   "background": {
     "service_worker": "background.js"
   },
+
   "action": {
-    "default_popup": "popup.html",
-    "default_icon": "icons/icon.png"
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon.png",
+      "32": "icons/icon.png",
+      "48": "icons/icon.png",
+      "128": "icons/icon.png"
+    },
+    "default_title": "Detector de Datos Personales"
   },
+
+  "icons": {
+    "16": "icons/icon.png",
+    "32": "icons/icon.png",
+    "48": "icons/icon.png",
+    "128": "icons/icon.png"
+  },
+
   "content_scripts": [
     {
       "matches": [
         "https://store.steampowered.com/*",
+        "https://steamcommunity.com/*",
         "https://www.roblox.com/*",
         "https://www.epicgames.com/*",
-        "https://discord.com/*",
-        "https://steamcommunity.com/*"
+        "https://discord.com/*"
       ],
-      "js": ["content.js"]
+      "js": [
+        "libs/onnxruntime-web.min.js",
+        "content/content.js"
+      ],
+      "run_at": "document_idle"
     }
-  ]
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/*",
+        "assets/ort-wasm/*",
+        "libs/*",
+        "ml/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  }
 }
