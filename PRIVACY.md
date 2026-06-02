@@ -38,4 +38,8 @@ Podemos actualizar esta Política de Privacidad en el futuro. Cualquier cambio s
 
 ## 6. Contacto
 
-Si tiene alguna pregunta técnica o duda sobre esta Política de Privacidad, por favor abra un *Issue* en este repositorio de GitHub para poder asistirle abiertamente.
+Si tiene alguna pregunta, comentario o inquietud sobre esta Política de Privacidad o sobre el funcionamiento de la extensión, puede contactarnos en:
+
+**Correo electrónico:** [cftp125@gmail.com](mailto:cftp125@gmail.com)
+
+También puede abrir un *Issue* en este repositorio de GitHub para reportar problemas técnicos o sugerir mejoras.
