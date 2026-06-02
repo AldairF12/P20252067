@@ -18,7 +18,7 @@ Nuestra extensión fue construida bajo el principio de **"Privacidad por Diseño
 La extensión utiliza el almacenamiento local de su navegador únicamente para guardar:
 *   Sus preferencias de configuración (por ejemplo, si la extensión está activada o pausada).
 *   El estado del tutorial inicial (onboarding).
-*   Un historial privado de advertencias (visible únicamente por usted en su equipo).
+*   Un historial privado de advertencias sin datos personales (visible únicamente por usted en su equipo).
 
 Esta información reside de forma segura en su disco duro y no tenemos forma de acceder a ella remotamente.
 
