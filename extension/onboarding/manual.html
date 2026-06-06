@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Manual de Usuario – Protector de Datos</title>
+  <meta name="description" content="Manual de usuario, instalación, arquitectura y FAQs de la extensión." />
+  
+  <link rel="icon" href="../icons/icon.png">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg-blobs" aria-hidden="true">
+    <div class="blob b1"></div>
+    <div class="blob b2"></div>
+    <div class="blob b3"></div>
+  </div>
+
+  <header class="site-header">
+    <div class="container nav">
+      <a class="brand" href="#hero">
+        <img src="../icons/icon.png" alt="" class="brand-icon"/>
+        <span>Protector de Datos</span>
+      </a>
+      <nav class="menu">
+        <a href="#instalacion">Instalación</a>
+        <a href="#arquitectura">Arquitectura</a>
+        <a href="#faqs">FAQs</a>
+        <a href="guia_inicial.html">Guía Rápida</a>
+      </nav>
+    </div>
+  </header>
+
+  <section id="hero" class="hero">
+    <div class="container">
+        <div class="hero-copy reveal" style="text-align: center; max-width: 760px; margin: 0 auto;">
+          <h1>Manual de Usuario 🛡️</h1>
+          <p>
+            Aquí encontrarás los detalles sobre la instalación, la arquitectura
+            de la extensión y las preguntas frecuentes.
+          </p>
+          <div class="hero-ctas" style="justify-content: center;">
+            <a class="btn primary" href="#instalacion">Ver Pasos de Instalación</a>
+            <a class="btn ghost" href="#arquitectura">Ver Arquitectura</a>
+          </div>
+        </div>
+    </div>
+  </section>
+
+  <hr style="border-color: rgba(255,255,255,0.1); max-width: 900px; margin: 0 auto;">
+
+  <section id="instalacion" class="section">
+    <div class="container">
+      <h2 class="section-title reveal">Instalación de la Extensión</h2>
+      <p class="section-subtitle reveal">Cómo cargar la extensión en tu navegador en modo desarrollador.</p>
+
+      <div class="step-card reveal">
+        <div>
+          <span class="badge-step">PASO 1</span>
+          <h3>Descargar y Descomprimir</h3>
+          <p>Descarga el archivo <code>.zip</code> y descomprímelo en una carpeta permanente en tu computadora.</p>
+          <p class="tip">Ej: en <code>C:\Mis Documentos\Extension</code></p>
+        </div>
+        <figure class="fig tilt">
+          <img src="assets/step-1-descargar.png" alt="Carpeta descomprimida"
+               onerror="this.src='https://dummyimage.com/600x350/232939/ffffff&text=Paso+1:+Descomprimir'">
+          <figcaption class="figcap">Carpeta con los archivos de la extensión.</figcaption>
+        </figure>
+      </div>
+
+      <div class="step-card reveal">
+        <div>
+          <span class="badge-step">PASO 2</span>
+          <h3>Ir a Extensiones</h3>
+          <p>Abre tu navegador (Chrome o Edge) y en la barra de direcciones, escribe <code>chrome://extensions</code> y presiona Enter.</p>
+        </div>
+        <figure class="fig tilt">
+          <img src="assets/step-2-extensiones.png" alt="Barra de direcciones de Chrome"
+               onerror="this.src='https://dummyimage.com/600x350/232939/ffffff&text=Paso+2:+Ir+a+extensions'">
+          <figcaption class="figcap">Escribe <code>chrome://extensions</code> en la barra.</figcaption>
+        </figure>
+      </div>
+
+      <div class="step-card reveal">
+        <div>
+          <span class="badge-step">PASO 3</span>
+          <h3>Modo Desarrollador</h3>
+          <p>Busca el interruptor de <strong>"Modo desarrollador"</strong> (usualmente en la esquina superior derecha) y actívalo.</p>
+        </div>
+        <figure class="fig tilt">
+          <img src="assets/step-3-modo.png" alt="Activar Modo Desarrollador"
+               onerror="this.src='https://dummyimage.com/600x350/232939/ffffff&text=Paso+3:+Activar+Modo'">
+          <figcaption class="figcap">Activa el interruptor.</figcaption>
+        </figure>
+      </div>
+
+      <div class="step-card reveal">
+        <div>
+          <span class="badge-step">PASO 4</span>
+          <h3>Clic en "Cargar Descomprimida"</h3>
+          <p>Aparecerá un botón que dice <strong>"Cargar descomprimida"</strong> (o "Load unpacked"). Haz clic en él.</p>
+          <p class="tip">Esto abrirá el explorador de archivos de tu sistema.</p>
+        </div>
+        <figure class="fig tilt">
+          <img src="assets/step-4-cargar.png" alt="Botón Cargar Descomprimida"
+               onerror="this.src='https://dummyimage.com/600x350/232939/ffffff&text=Paso+4:+Clic+en+Botón'">
+          <figcaption class="figcap">Haz clic en el botón que aparece a la izquierda.</figcaption>
+        </figure>
+      </div>
+
+      <div class="step-card reveal">
+        <div>
+          <span class="badge-step">PASO 5</span>
+          <h3>Selecciona la Carpeta</h3>
+          <p>Se abrirá el explorador de archivos. Debes seleccionar la carpeta raíz que descomprimiste (la que contiene el archivo <code>manifest.json</code>).</p>
+          <p class="tip">No entres a la carpeta, solo haz clic en ella una vez y presiona "Seleccionar carpeta".</p>
+        </div>
+        <figure class="fig tilt">
+          <img src="assets/step-5-seleccionar.png" alt="Seleccionar la carpeta de la extensión"
+               onerror="this.src='https://dummyimage.com/600x350/232939/ffffff&text=Paso+5:+Seleccionar+Carpeta'">
+          <figcaption class="figcap">Explorador de archivos pidiendo la carpeta.</figcaption>
+        </figure>
+      </div>
+      </div>
+  </section>
+
+  
+  <section id="arquitectura" class="section alt">
+    <div class="container">
+      <h2 class="section-title reveal">Arquitectura (100% Local)</h2>
+      <p class="section-subtitle reveal">Basada en Manifest V3 y procesamiento en el navegador.</p>
+      <div class="grid-2">
+        <ul class="list glass reveal">
+          <li><b>Content Script:</b> Captura y normaliza el texto que escribes.</li>
+          <li><b>Service Worker:</b> Coordina el flujo y aplica las políticas de configuración (ej. "ignorar Steam").</li>
+          <li><b>NLP Engine (ONNX):</b> El modelo de IA se ejecuta <strong>directamente en el navegador</strong> para analizar el texto.</li>
+          <li><b>Privacidad Total:</b> Tus textos <strong>nunca</strong> salen de tu computadora. No se depende de servidores externos.</li>
+          <li><b>Popup UI / History:</b> Permite la configuración y la revisión del historial local.</li>
+        </ul>
+
+        <div class="card glass tilt reveal">
+          <img src="assets/arquitectura.bmp" alt="Diagrama de arquitectura"
+               onerror="this.src='https://dummyimage.com/900x560/1d2029/ffffff&text=Diagrama+de+Arquitectura'">
+          
+          <div class="zoom-actions">
+            <button class="btn small open-zoom"
+                    data-full="assets/arquitectura-full.png" 
+                    aria-haspopup="dialog">Ver detalle</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <section id="faqs" class="section">
+    <div class="container">
+      <h2 class="section-title reveal">Solución de Problemas y FAQs</h2>
+      <div class="faqs">
+        <details class="reveal">
+          <summary>¿Mis datos están seguros? ¿Se envían a un servidor?</summary>
+          <p><strong>Están 100% seguros.</strong> Tus textos NUNCA salen de tu computadora. El nuevo modelo ONNX se ejecuta localmente en tu navegador, por lo que no hay necesidad de enviar información a ningún servidor.</p>
+        </details>
+        <details class="reveal">
+          <summary>La extensión no detecta nada.</summary>
+          <p>Revisa tres cosas:
+            <ol>
+              <li>Que el interruptor principal en el popup esté <strong>"Activada"</strong>.</li>
+              <li>Que la página en la que estás (ej. Steam) esté <strong>marcada</strong> en la lista.</li>
+              <li>Que el tipo de dato (ej. Correo) esté <strong>marcado</strong>.</li>
+            </ol>
+          </p>
+        </details>
+        <details class="reveal">
+          <summary>¿La extensión funciona si no tengo internet?</summary>
+          <p><strong>Sí.</strong> Una vez instalada, la extensión y el modelo de IA funcionan completamente offline, ya que todo está contenido dentro de la propia extensión.</p>
+        </details>
+        <details class="reveal">
+          <summary>Error: "No se pudo cargar la extensión" o "Manifest v3 no válido".</summary>
+          <p>Esto suele ocurrir si seleccionas el archivo <code>.zip</code> o una carpeta incorrecta. Asegúrate de seleccionar la carpeta raíz que descomprimiste, aquella que contiene el archivo <code>manifest.json</code> directamente dentro.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div>
+        <div class="brand mini">
+          <img src="../icons/icon.png" alt="" class="brand-icon"/>
+          <span>Protector de Datos</span>
+        </div>
+        <p class="muted">Manual de usuario completo de la extensión.</p>
+      </div>
+      <nav class="footer-nav">
+        <a href="#instalacion">Instalación</a>
+        <a href="#arquitectura">Arquitectura</a>
+        <a href="#faqs">FAQs</a>
+      </nav>
+      <div class="legal muted">© <span id="y"></span> Todos los derechos reservados.</div>
+    </div>
+  </footer>
+
+  <div class="zoom-overlay" id="zoomOverlay" role="dialog" aria-modal="true" aria-label="Vista ampliada del diagrama" hidden>
+    <div class="zoom-toolbar">
+      <button class="zb zb-close" id="zbClose" title="Cerrar (Esc)" aria-label="Cerrar">✕</button>
+      <div class="zb-group">
+        <button class="zb" id="zbZoomOut" title="Alejar (—)" aria-label="Alejar">−</button>
+        <button class="zb" id="zbZoomIn"  title="Acercar (+)" aria-label="Acercar">+</button>
+        <button class="zb" id="zbReset"   title="Reiniciar (0)" aria-label="Reiniciar">0</button>
+      </div>
+    </div>
+    <div class="zoom-stage" id="zoomStage" tabindex="0">
+      <img id="zoomImg" src="" alt="Diagrama en detalle">
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

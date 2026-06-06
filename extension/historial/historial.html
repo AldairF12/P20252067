@@ -9,10 +9,8 @@
   <body>
     <div class="historial">
       <main class="main-content">
-        <!-- Columna izquierda: grupos (Hoy/Ayer/Fecha) -->
         <section id="groups" class="groups" aria-live="polite"></section>
 
-        <!-- Columna derecha: Glosario + acciones -->
         <aside class="side">
           <section class="glossary" aria-label="Glosario de términos">
             <h2 class="glossary-title">Glosario</h2>
@@ -34,7 +32,6 @@
       </main>
     </div>
 
-    <!-- Plantillas -->
     <template id="tpl-group">
       <section class="group" role="region">
         <h3 class="group-title"></h3>
@@ -72,7 +69,6 @@
       </article>
     </template>
 
-    <!-- Modal de Privacidad -->
     <div id="privacy-overlay" class="overlay" hidden></div>
     <div id="privacy-modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="priv-title">
       <div class="modal-header">
@@ -106,8 +102,37 @@
         <button id="btn-priv-aceptar" class="btn btn-primary">Aceptar</button>
       </div>
     </div>
-
+    
+    <div id="about-overlay" class="overlay" hidden></div>
+    <div id="about-modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="about-title">
+      <div class="modal-header">
+        <h2 id="about-title">Acerca de</h2>
+      </div>
+      <div class="modal-body">
+        <div class="about-box">
+          <div class="about-row">
+            <span class="about-label">Procesamiento local:</span>
+            <span class="about-value">
+              <span class="about-badge about-ok">✅</span>
+              <span id="about-estado">Activado</span>
+            </span>
+          </div>
+          <div class="about-row">
+            <span class="about-label">Solicitudes a redes externas:</span>
+            <span class="about-value">
+              <span id="about-redes">0</span>
+            </span>
+          </div>
+        </div>
+        <p style="text-align: center; margin: 15px 0 0 0; font-size: 12px; color: var(--muted);">
+          Tus datos se procesan localmente y no se envían a servidores.
+        </p>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-about-aceptar" class="btn btn-primary">Aceptar</button>
+      </div>
+    </div>
+    
     <script src="historial.js"></script>
   </body>
 </html>
-

@@ -6,5 +6,8 @@ export const LABELS = [
   "tarjeta",
   "nombre",
   "correo",
+  "edad",
+  "ubicacion",
+  "enlace_sospechoso",
   "ninguno"
 ];

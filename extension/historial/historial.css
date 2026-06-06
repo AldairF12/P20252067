@@ -14,9 +14,9 @@ abbr{text-decoration:none;cursor:help}
   --shadow:0 10px 25px rgba(0,0,0,.10);
   --radius:14px;
 
-  --verde-strong:  #52F218;  /* Resuelto */
+  --verde-strong:   #52F218;  /* Resuelto */
   --amarillo-strong:#E6E600; /* Omitido */
-  --gris-ignorar:  #DEDEDE;  /* Ignorado */
+  --gris-ignorar:   #DEDEDE;  /* Ignorado */
 
 
   --verde:#27c24c;
@@ -102,8 +102,8 @@ abbr{text-decoration:none;cursor:help}
   margin-top: 2px;
   background:#2600ff7d; color:#fff;
   border-radius: 999px;
-  padding: 8px 22px;                  /* << más largo */
-  min-width: 180px;                   /* << ancho mínimo */
+  padding: 8px 22px;              /* << más largo */
+  min-width: 180px;               /* << ancho mínimo */
   text-align: center;
 }
 .chip-text{ font: 700 12.5px Inter,system-ui }
@@ -193,8 +193,8 @@ abbr{text-decoration:none;cursor:help}
   position: fixed; left: 50%; top: 50%;
   transform: translate(-50%, -50%);
   width: min(540px, 92vw);
-  max-height: 90vh;                   /* << mantiene scroll interno */
-  overflow: auto;                     /* << scrollea dentro del modal */
+  max-height: 90vh;               /* << mantiene scroll interno */
+  overflow: auto;                 /* << scrollea dentro del modal */
   background: #fff;
   border-radius: 16px;
   box-shadow: 0 20px 60px rgba(0,0,0,.35);
@@ -251,9 +251,9 @@ abbr{text-decoration:none;cursor:help}
 
 /* Contenido scrolleable */
 .modal-body{
-  flex:1;                       /* ocupa todo el espacio disponible */
-  overflow-y:auto;              /* permite scroll solo del texto */
-  padding:18px 18px 70px;       /* deja espacio para el botón fijo */
+  flex:1;                 /* ocupa todo el espacio disponible */
+  overflow-y:auto;        /* permite scroll solo del texto */
+  padding:18px 18px 70px;  /* deja espacio para el botón fijo */
   font:400 13.5px/1.5 Inter,system-ui;
   color:#222;
 }
@@ -302,6 +302,32 @@ abbr{text-decoration:none;cursor:help}
 .modal[hidden], .overlay[hidden]{display:none !important}
 
 
-
-
-
+/* ====== Acerca de (HU18) ====== */
+.about-box{
+  margin: 4px auto 0;
+  max-width: 360px;
+  background:#ffffff;
+  border:1px solid var(--borde);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 14px;
+}
+.about-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  padding: 6px 0;
+}
+.about-label{
+  font:700 14px Inter,system-ui; color:#111;
+}
+.about-value{
+  display:flex; align-items:center; gap:8px;
+  font:700 14px Inter,system-ui; color:#111;
+}
+.about-badge{
+  display:inline-flex; width:18px; height:18px; align-items:center; justify-content:center;
+  border-radius:4px;
+}
+.about-ok{ background:#e7f7e7; }

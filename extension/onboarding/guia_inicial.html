@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Guía Inicial – Protector de Datos</title>
+  <meta name="description" content="Guía rápida para configurar tu extensión de privacidad." />
+  
+  <link rel="icon" href="../icons/icon.png"> 
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg-blobs" aria-hidden="true">
+    <div class="blob b1"></div>
+    <div class="blob b2"></div>
+    <div class="blob b3"></div>
+  </div>
+
+  <header class="site-header">
+    <div class="container nav">
+      <a class="brand" href="#">
+        <img src="../icons/icon.png" alt="" class="brand-icon"/>
+        <span>Protector de Datos</span>
+      </a>
+      <nav class="menu">
+        <a href="manual.html#configuracion">Configuración</a>
+         <a href="manual.html#arquitectura">Arquitectura</a>
+         <a href="manual.html#faqs">FAQs</a>
+      </nav>
+      <a class="btn primary" href="manual.html">Ir al Manual de Usuario</a>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="container">
+        <div class="hero-copy reveal" style="text-align: center; max-width: 760px; margin: 0 auto;">
+        <h1>¡Bienvenido a tu extensión de privacidad! 🛡️</h1>
+        <p>
+          Gracias por instalar. Aquí te explicamos rápidamente cómo configurar la extensión desde el popup.
+        </p>
+        
+        <div class="hero-ctas" style="justify-content: center;">
+          <a class="btn primary" href="#configuracion">Empezar Configuración</a>
+          <a class="btn ghost" href="manual.html">Ver Manual de Usuario Completo</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="configuracion" class="section">
+    <div class="container">
+      <h2 class="section-title reveal">Configuración Rápida (desde el Popup)</h2>
+      <div class="faqs" style="max-width: 820px; margin: 0 auto;">
+
+        <details class="reveal" open>
+          <summary>1. Interruptor principal</summary>
+          <p>
+            En el popup verás un interruptor con el texto
+            <strong>“Extensión activada / desactivada”</strong>.
+          </p>
+          <ul>
+            <li><strong>Activada:</strong> la extensión analiza lo que escribes en los sitios compatibles.</li>
+            <li><strong>Desactivada:</strong> no se realiza ningún análisis ni se muestran avisos.</li>
+          </ul>
+        </details>
+
+        <details class="reveal" open>
+          <summary>2. Páginas habilitadas</summary>
+          <p>
+            Puedes marcar o desmarcar en qué plataformas quieres que funcione:
+            <strong>Steam, Roblox, Epic Games y Discord</strong>.
+          </p>
+        </details>
+
+        <details class="reveal" open>
+          <summary>3. Tipos de datos</summary>
+          <p>
+            Aquí eliges qué datos personales quieres que se detecten:
+            <strong>Correo, DNI, Tarjeta y Nombre</strong>.
+          </p>
+        </details>
+
+        <details class="reveal" open>
+          <summary>4. Avisos emergentes</summary>
+          <p>
+            Cuando se detecta una posible exposición de datos, aparecerá un aviso.
+            Puedes <strong>Aceptar</strong>, <strong>Omitir</strong> o <strong>Ignorar</strong>.
+          </p>
+        </details>
+
+        <details class="reveal" open>
+          <summary>5. Historial de avisos</summary>
+          <p>
+            La extensión guarda un historial local. Desde la opción de <strong>Historial</strong> podrás
+            revisar qué datos se expusieron y en qué página ocurrió.
+          </p>
+        </details>
+
+        <details class="reveal" open>
+          <summary>¡Listo para empezar!</summary>
+          <p>Con esto la configuración está completa. Si quieres ver más detalles, consulta el <strong>Manual de Usuario</strong>.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div>
+        <div class="brand mini">
+          <img src="../icons/icon.png" alt="" class="brand-icon"/>
+          <span>Protector de Datos</span>
+        </div>
+        <p class="muted">Guía de bienvenida y configuración rápida.</p>
+      </div>
+      <nav class="footer-nav">
+        <a href="manual.html#instalacion">Instalación</a>
+        <a href="manual.html#arquitectura">Arquitectura</a>
+        <a href="manual.html#faqs">FAQs</a>
+      </nav>
+      <div class="legal muted">© <span id="y"></span> Todos los derechos reservados.</div>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

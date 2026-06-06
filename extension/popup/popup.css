@@ -1,16 +1,55 @@
+/* ==================
+   Variables de Tema
+   ================== */
 body {
+  /* Tema Claro (Default) */
+  --bg-color: #f8f9fa;
+  --text-color: #212529;
+  --text-muted: #6c757d;
+  --card-bg: #ffffff;
+  --card-border: #e2e6ea;
+  --select-border: #ced4da;
+  --btn-bg: #007bff;
+  --btn-hover: #0056b3;
+  --switch-bg: #ccc;
+  --switch-bg-active: #28a745;
+  --arrow-filter: grayscale(1) opacity(0.5);
+
   font-family: 'Segoe UI', sans-serif;
-  width: 320px;
+  width: 300px;
   padding: 15px;
-  background-color: #f8f9fa;
+  background-color: var(--bg-color);
+  color: var(--text-color);
 }
 
+body.dark-theme {
+  /* Tema Oscuro */
+  --bg-color: #20232a;
+  --text-color: #e8eaf0;
+  --text-muted: #9a9fad;
+  --card-bg: #2a2e37;
+  --card-border: #3b3f4c;
+  --select-border: #4a5060;
+  --btn-bg: #3a86ff;
+  --btn-hover: #5c9eff;
+  --switch-bg: #4a5060;
+  --switch-bg-active: #3a86ff;
+  --arrow-filter: invert(1) opacity(0.6);
+}
+
+/* ==================
+   Estilos Generales
+   ================== */
 .titulo {
   text-align: center;
   font-size: 18px;
   margin-bottom: 15px;
+  color: var(--text-color);
 }
 
+/* ==================
+   Interruptor (Toggle)
+   ================== */
 .interruptor-container {
   display: flex;
   justify-content: space-between;
@@ -30,7 +69,7 @@ body {
 .slider {
   position: absolute;
   cursor: pointer;
-  background-color: #ccc;
+  background-color: var(--switch-bg);
   border-radius: 34px;
   top: 0; left: 0; right: 0; bottom: 0;
   transition: 0.4s;
@@ -49,13 +88,16 @@ body {
 }
 
 input:checked + .slider {
-  background-color: #28a745;
+  background-color: var(--switch-bg-active);
 }
 
 input:checked + .slider:before {
   transform: translateX(26px);
 }
 
+/* ==================
+   Secciones
+   ================== */
 .opciones {
   display: flex;
   justify-content: space-between;
@@ -65,34 +107,108 @@ input:checked + .slider:before {
 .columna h3 {
   margin-bottom: 5px;
   font-size: 14px;
-  color: #333;
+  color: var(--text-color);
 }
 
 .columna label {
   display: block;
   margin-bottom: 5px;
+  color: var(--text-muted);
 }
+
+.columna input[type="checkbox"] {
+  accent-color: var(--btn-bg);
+}
+
 
 .contador {
   text-align: center;
   background: #ffc107;
+  color: #333; /* Color de texto oscuro para contraste */
   padding: 5px;
   border-radius: 6px;
   margin-bottom: 10px;
   font-weight: bold;
 }
 
+.seccion-posicion,
+.seccion-tema {
+  margin-bottom: 15px;
+  padding: 10px;
+  background: var(--card-bg);
+  border-radius: 8px;
+  border: 1px solid var(--card-border);
+}
+
+.seccion-posicion h3,
+.seccion-tema h3 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: var(--text-color);
+}
+
+.ayuda-posicion {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ==================
+   Combobox Bonito (Nuevo)
+   ================== */
+.select-wrapper {
+  position: relative;
+}
+
+/* Oculta la flecha por defecto */
+select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  /* Estilos del select */
+  width: 100%;
+  padding: 8px 12px;
+  padding-right: 30px; /* Espacio para la flecha custom */
+  border-radius: 6px;
+  border: 1px solid var(--select-border);
+  font-size: 13px;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  cursor: pointer;
+}
+
+/* Flecha custom (SVG Base64) */
+.select-wrapper::after {
+  content: ' ';
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5H7z"></path></svg>');
+  background-size: contain;
+  background-repeat: no-repeat;
+  filter: var(--arrow-filter);
+  pointer-events: none; /* Permite hacer clic en el select */
+}
+
+/* ==================
+   Botones
+   ================== */
 button {
   width: 100%;
   margin-top: 5px;
   padding: 8px;
-  background-color: #007bff;
+  background-color: var(--btn-bg);
   border: none;
   color: white;
   border-radius: 6px;
   cursor: pointer;
+  font-weight: 600;
+  transition: background-color 0.2s;
 }
 
 button:hover {
-  background-color: #0056b3;
+  background-color: var(--btn-hover);
 }

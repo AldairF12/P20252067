@@ -21,6 +21,9 @@ let tokenizerPromise = null;
 let sessionPromise   = null;
 let ortInstance      = null;
 
+// Mutex para evitar ejecuciones concurrentes de session.run
+let runMutex = Promise.resolve();
+
 function getTokenizer() {
   if (!tokenizerPromise) {
     tokenizerPromise = AutoTokenizer.from_pretrained(TOKENIZER_ID, {
@@ -49,6 +52,21 @@ async function getSession() {
     });
   }
   return sessionPromise;
+}
+
+// Ejecuta session.run de forma exclusiva (sin concurrencia)
+async function runExclusive(session, feeds) {
+  // Espera a que termine la ejecución anterior
+  const prev = runMutex;
+  let release;
+  runMutex = new Promise(r => (release = r));
+  await prev;
+  try {
+    return await session.run(feeds);
+  } finally {
+    // Libera el siguiente en la cola
+    release();
+  }
 }
 
 // Softmax
@@ -115,8 +133,8 @@ export async function analizarTextoConModelo(texto) {
     feeds.attention_mask = attention_mask;
   }
 
-  // 3) Inferencia ONNX
-  const out = await session.run(feeds);
+  // 3) Inferencia ONNX (exclusiva: sin concurrencia)
+  const out = await runExclusive(session, feeds);
 
   const raw = out.output || out.logits;
   if (!raw || !raw.data) {

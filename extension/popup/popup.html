@@ -9,7 +9,7 @@
   <h2 class="titulo">Protector de datos personales</h2>
 
   <div class="interruptor-container">
-    <label for="toggle" id="estado-label">Extensión activada</label>
+    <label for="toggle" id="estado-label" style="font-weight:bold; font-size: 14px;">Extensión activada</label>
     <label class="switch">
       <input type="checkbox" id="toggle" checked>
       <span class="slider"></span>
@@ -18,23 +18,50 @@
 
   <div class="opciones">
     <div class="columna">
-      <h3>Paginas</h3>
-      <label><input type="checkbox" checked> Steam</label>
-      <label><input type="checkbox" checked> Roblox</label>
-      <label><input type="checkbox" checked> Epic Games</label>
-      <label><input type="checkbox" checked> Discord</label>
+      <h3>Páginas</h3>
+      <label><input type="checkbox" id="pg-steam" checked>
+        <img src="https://upload.wikimedia.org/wikipedia/commons/8/83/Steam_icon_logo.svg" alt="Steam" class="logo" width="12px"> Steam</label>
+      <label><input type="checkbox" id="pg-roblox" checked>
+        <img src="https://upload.wikimedia.org/wikipedia/commons/1/1e/Roblox_Logo_2025.png" alt="Steam" class="logo" width="12px"> Roblox</label>
+      <label><input type="checkbox" id="pg-epic" checked>
+        <img src="https://upload.wikimedia.org/wikipedia/commons/a/a7/Epic_Games_logo.png" alt="Steam" class="logo" width="12px"> Epic Games</label>
+      <label><input type="checkbox" id="pg-discord" checked>
+        <img src="https://www.svgrepo.com/show/353655/discord-icon.svg" alt="Steam" class="logo" width="12px"> Discord</label>
     </div>
     <div class="columna">
       <h3>Tipos de datos</h3>
-      <label><input type="checkbox" checked> Correo</label>
-      <label><input type="checkbox" checked> Nombre</label>
-      <label><input type="checkbox" checked> Tarjeta</label>
-      <label><input type="checkbox" checked> DNI</label>
+      <label><input type="checkbox" id="tp-correo" checked> Correo</label>
+      <label><input type="checkbox" id="tp-nombre" checked> Nombre</label>
+      <label><input type="checkbox" id="tp-tarjeta" checked> Tarjeta</label>
+      <label><input type="checkbox" id="tp-dni" checked> DNI</label>
     </div>
   </div>
 
-  <div class="contador">2 avisos hoy</div>
+  <div class="contador">0 avisos hoy</div>
 
+  <div class="seccion-posicion">
+    <h3>Ubicación de las alertas</h3>
+    <div class="select-wrapper">
+      <select id="posicion-alerta">
+        <option value="bottom-right">Abajo derecha (recomendado)</option>
+        <option value="bottom-left">Abajo izquierda</option>
+        <option value="top-right">Arriba derecha</option>
+        <option value="top-left">Arriba izquierda</option>
+      </select>
+    </div>
+  </div>
+  
+  <div class="seccion-tema">
+    <h3>Tema de la interfaz</h3>
+    <div class="select-wrapper">
+      <select id="theme-select">
+        <option value="system">Automático (Sistema)</option>
+        <option value="light">Claro</option>
+        <option value="dark">Oscuro</option>
+      </select>
+    </div>
+  </div>
+  
   <button id="guia">Ver guía inicial</button>
   <button id="historial">Abrir historial</button>
 

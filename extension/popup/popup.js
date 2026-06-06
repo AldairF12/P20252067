@@ -13,6 +13,12 @@ const chkNombre  = document.getElementById("tp-nombre");
 const chkTarjeta = document.getElementById("tp-tarjeta");
 const chkDni     = document.getElementById("tp-dni");
 
+// Referencia al select de posición
+const selectPosicion = document.getElementById("posicion-alerta");
+
+// AÑADIDO: Referencia al select de tema
+const selectTheme = document.getElementById("theme-select");
+
 // Contador
 const contadorEl = document.querySelector(".contador");
 
@@ -29,7 +35,6 @@ async function actualizarContadorDiario() {
     const { historialAvisos } = await chrome.storage.local.get("historialAvisos");
     const arr = Array.isArray(historialAvisos) ? historialAvisos : [];
     const hoy = hoyYYYYMMDD();
-    // contar todo lo de hoy (aceptar/omitir/ignorar), sin filtrar por tipo
     const count = arr.filter(e => {
       if (!e || !e.ts) return false;
       const d = new Date(e.ts);
@@ -46,12 +51,37 @@ async function actualizarContadorDiario() {
   }
 }
 
+// --- AÑADIDO: Función para aplicar el tema ---
+function aplicarTema(theme) {
+  let temaFinal = theme;
+  if (theme === 'system') {
+    // Revisa la preferencia del OS
+    const prefiereOscuro = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    temaFinal = prefiereOscuro ? 'dark' : 'light';
+  }
+
+  if (temaFinal === 'dark') {
+    document.body.classList.add('dark-theme');
+    document.body.classList.remove('light-theme');
+  } else {
+    document.body.classList.add('light-theme');
+    document.body.classList.remove('dark-theme');
+  }
+}
+
 // Init UI desde storage
 document.addEventListener("DOMContentLoaded", async () => {
-  const { activo, paginas, tipos } = await chrome.storage.local.get(["activo","paginas","tipos"]);
+  // MODIFICADO: Añadido "theme" y "posicionAlerta"
+  const { activo, paginas, tipos, posicionAlerta, theme } = await chrome.storage.local.get([
+    "activo",
+    "paginas",
+    "tipos",
+    "posicionAlerta",
+    "theme"
+  ]);
 
   // Toggle
-  const isActive = activo !== false; // por defecto true
+  const isActive = activo !== false;
   toggle.checked = isActive;
   estadoLabel.textContent = isActive ? "Extensión activada" : "Extensión desactivada";
   estadoLabel.style.color = isActive ? "green" : "red";
@@ -67,15 +97,33 @@ document.addEventListener("DOMContentLoaded", async () => {
   chkNombre.checked  = tipos?.nombre  ?? true;
   chkTarjeta.checked = tipos?.tarjeta ?? true;
   chkDni.checked     = tipos?.dni     ?? true;
+  
+  // Cargar la posición guardada
+  if (selectPosicion) {
+    selectPosicion.value = posicionAlerta ?? "bottom-right";
+  }
+  
+  // AÑADIDO: Cargar y aplicar el tema guardado
+  if (selectTheme) {
+    const savedTheme = theme ?? "system";
+    selectTheme.value = savedTheme;
+    aplicarTema(savedTheme);
+  }
 
   // Contador diario
   actualizarContadorDiario();
 });
 
-// Reactualizar contador si cambia el storage mientras el popup está abierto
+// Reactualizar contador si cambia el storage
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.historialAvisos) {
     actualizarContadorDiario();
+  }
+  // AÑADIDO: Escucha cambios de tema desde otras pestañas
+  if (area === "local" && changes.theme) {
+    const newTheme = changes.theme.newValue ?? "system";
+    selectTheme.value = newTheme;
+    aplicarTema(newTheme);
   }
 });
 
@@ -117,15 +165,30 @@ for (const [el, key] of [
   });
 }
 
+// Guardar la posición al cambiar
+if (selectPosicion) {
+  selectPosicion.addEventListener("change", async () => {
+    const nuevaPosicion = selectPosicion.value;
+    await chrome.storage.local.set({ posicionAlerta: nuevaPosicion });
+  });
+}
+
+// AÑADIDO: Guardar y aplicar el tema al cambiar
+if (selectTheme) {
+  selectTheme.addEventListener("change", async () => {
+    const nuevoTema = selectTheme.value;
+    await chrome.storage.local.set({ theme: nuevoTema });
+    aplicarTema(nuevoTema);
+  });
+}
+
+// Botones de navegación
 document.getElementById("guia").addEventListener("click", () => {
-  alert("📘 La extensión detecta posibles exposiciones de datos personales en las páginas habilitadas.");
+  const url = chrome.runtime.getURL("onboarding/guia_inicial.html");
+  chrome.tabs.create({ url });
 });
 
-// Botón historial (abre la página de historial)
-  if (btnHistorial) {
-    btnHistorial.addEventListener("click", () => {
-      const url = chrome.runtime.getURL("historial/index.html");
-      chrome.tabs.create({ url });
-    });
-  }
-
+document.getElementById("historial").addEventListener("click", () => {
+  const url = chrome.runtime.getURL("historial/historial.html");
+  chrome.tabs.create({ url });
+});

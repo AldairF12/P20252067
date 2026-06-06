@@ -3,11 +3,11 @@ const HIST_KEY = "historialAvisos";
 /* Mensajes por tipo */
 function mensajesPorTipo(tipo){
   switch (tipo){
-    case "correo":  return { aviso:"Correo expuesto",          vuln:"Exposición de datos personales (correo).",  reco:"Enmascara o evita publicar tu correo en espacios públicos." };
-    case "dni":     return { aviso:"DNI detectado",             vuln:"Número de DNI expuesto.",                  reco:"No compartas tu DNI en foros o chats." };
-    case "tarjeta": return { aviso:"Posible número de tarjeta", vuln:"Patrón de tarjeta detectado.",             reco:"Nunca escribas números de tarjeta en campos no seguros." };
-    case "nombre":  return { aviso:"Nombre real detectado",     vuln:"Exposición de nombre.",                    reco:"Evita publicar tu nombre completo en contextos públicos." };
-    default:        return { aviso:"Dato sensible detectado",   vuln:"Dato potencialmente sensible.",            reco:"Evita compartir información personal en público." };
+    case "correo":  return { aviso:"Correo expuesto",           vuln:"Exposición de datos personales (correo).",   reco:"Enmascara o evita publicar tu correo en espacios públicos." };
+    case "dni":     return { aviso:"DNI detectado",             vuln:"Número de DNI expuesto.",                    reco:"No compartas tu DNI en foros o chats." };
+    case "tarjeta": return { aviso:"Posible número de tarjeta", vuln:"Patrón de tarjeta detectado.",               reco:"Nunca escribas números de tarjeta en campos no seguros." };
+    case "nombre":  return { aviso:"Nombre real detectado",     vuln:"Exposición de nombre.",                      reco:"Evita publicar tu nombre completo en contextos públicos." };
+    default:        return { aviso:"Dato sensible detectado",   vuln:"Dato potencialmente sensible.",              reco:"Evita compartir información personal en público." };
   }
 }
 
@@ -110,17 +110,44 @@ function closePrivacy(){
   document.body.style.overflow = "";
 }
 
+/* ============================================
+AÑADIDO: Funciones para el modal "Acerca de"
+============================================
+*/
+function openAbout(){
+  // Seteamos los valores estáticos como pediste
+  document.getElementById("about-estado").textContent = "Activado";
+  document.getElementById("about-redes").textContent = "0";
+  
+  document.getElementById("about-overlay").hidden = false;
+  document.getElementById("about-modal").hidden = false;
+  document.body.style.overflow = "hidden";
+}
+function closeAbout(){
+  document.getElementById("about-overlay").hidden = true;
+  document.getElementById("about-modal").hidden = true;
+  document.body.style.overflow = "";
+}
+/* Fin de sección añadida */
+
+
 document.addEventListener("DOMContentLoaded", ()=>{
   render();
 
-  // Botones
+  // Botones Privacidad
   document.getElementById("btn-privacidad").addEventListener("click", openPrivacy);
   document.getElementById("btn-priv-aceptar").addEventListener("click", closePrivacy);
   document.getElementById("privacy-overlay").addEventListener("click", closePrivacy);
 
-  document.getElementById("btn-acerca").addEventListener("click", ()=>{
-    chrome.tabs.create({ url: chrome.runtime.getURL("popup.html") });
-  });
+  /* ============================================
+  MODIFICADO: Lógica del botón "Acerca de"
+  ============================================
+  */
+  document.getElementById("btn-acerca").addEventListener("click", openAbout);
+  document.getElementById("btn-about-aceptar").addEventListener("click", closeAbout);
+  document.getElementById("about-overlay").addEventListener("click", closeAbout);
+  /* Fin de modificación */
+
   document.getElementById("btn-reset").addEventListener("click", ()=>{
     if (!confirm("¿Borrar todo el historial de detecciones?")) return;
     chrome.storage.local.set({ [HIST_KEY]: [] }, render);

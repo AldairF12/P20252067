@@ -1,8 +1,22 @@
 // =================== Estado global ===================
+
+// Helper de seguridad: escapa caracteres HTML para evitar XSS al insertar texto de usuario en innerHTML
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
+}
+
 let avisoActivo = null;            // nodo del aviso (singleton)
 let ultimoTipoDetectado = null;
 let ultimosMatches = [];
 let ultimoTarget = null;
+
+// Cola de detecciones múltiples: cuando el texto contiene varios datos sensibles
+// (ej. correo + DNI), se muestran en secuencia después de cada omitir/aceptar.
+let colaDetecciones = []; // [{tipo, matches, vulnerabilidad, recomendacion}]
+let colaTarget = null; // elemento input asociado a la cola actual
+let colaTexto = "";   // snapshot del texto que originó la cola
 
 // Timers globales
 let autoCloseTimerId = null;
@@ -12,6 +26,9 @@ let hardCloseTimerId = null;
 const HARD_MAX_MS = 15000; // tope duro 15s
 let lastCopyNoticeAt = 0;
 const COPY_COOLDOWN_MS = 2000; // evita spam por múltiples copy seguidos
+
+// Control de análisis para evitar resultados viejos
+let ultimaSolicitudId = 0;
 
 // ====== Cache de ajustes (se actualiza en caliente) ======
 const state = {
@@ -25,30 +42,135 @@ const state = {
 const FORM_COOLDOWN_MS = 60000; // 60s
 const formLastShown = new WeakMap(); // WeakMap<Element, number>
 
+// --- HU-12: Dominios para enlaces acortados y typosquatting ---
+const SHORTENER_DOMAINS = new Set([
+  "bit.ly", "t.co", "tinyurl.com", "ow.ly", "is.gd", "buff.ly",
+  "rebrand.ly", "cutt.ly", "goo.gl", "tiny.cc", "bit.do"
+]);
+
+const LEGITIMATE_DOMAINS = new Set([
+  "youtube.com", "google.com", "facebook.com", "discord.com",
+  "steamcommunity.com", "steampowered.com", "roblox.com", "epicgames.com",
+  "twitter.com", "twitch.tv"
+]);
+
+// Cuánta “distancia” permitimos entre un dominio real y uno sospechoso
+const TYPO_THRESHOLD = 2;
+
+
 // Palabras clave por categoría
 const KW = {
-  correo:    /\b(correo|e-?mail|email)\b/i,
-  dni:       /\b(dni|documento|c[eé]dula|id\s*nacional|nro\s*doc)\b/i,
-  tarjeta:   /\b(tarjeta|credit|debit|cvv|cvc|n[uú]mero\s*de\s*tarjeta|pan)\b/i,
-  nombre:    /\b(nombre(?:\s+real)?|name|nombres|apellidos|apellido)\b/i,
-  telefono:  /\b(t[eé]lefono|cel(ular)?|m[oó]vil|whats?app|phone|n[uú]mero\s*de\s*tel[eé]fono)\b/i,
+  correo: /\b(correo|e-?mail|email)\b/i,
+  dni: /\b(dni|documento|c[eé]dula|id\s*nacional|nro\s*doc)\b/i,
+  tarjeta: /\b(tarjeta|credit|debit|cvv|cvc|n[uú]mero\s*de\s*tarjeta|pan)\b/i,
+  nombre: /\b(nombre(?:\s+real)?|name|nombres|apellidos|apellido)\b/i,
+  telefono: /\b(t[eé]lefono|cel(ular)?|m[oó]vil|whats?app|phone|n[uú]mero\s*de\s*tel[eé]fono)\b/i,
   ubicacion: /\b(ubicaci[oó]n|ciudad|direcci[oó]n|address|location|provincia|regi[oó]n)\b/i,
 };
 
 // categorías que cuentan para el umbral
 const CATEGORIAS_SENSIBLES = ["correo", "dni", "tarjeta", "nombre", "telefono"];
 
+
 // ====== Capa ML (modelo ONNX en la propia extensión) ======
 let mlModulePromise = null;
 
 async function analizarTextoML(texto) {
   // Carga perezosa del módulo de inferencia
+  console.log("analizar con el inference");
   if (!mlModulePromise) {
     mlModulePromise = import(chrome.runtime.getURL("ml/inference.js"));
   }
   const { analizarTextoConModelo } = await mlModulePromise;
   return analizarTextoConModelo(texto);
 }
+
+// ================= Regla correo + tarjeta (menos falsos positivos) =================
+function aplicarReglaCorreoTarjeta(texto, { expone, tipo }) {
+  const correoRegex = /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/;
+
+  const hayCorreo = correoRegex.test(texto);
+  const hayTarjeta = extraerTarjetasValidas(texto).length > 0;
+
+  // 1) Si el modelo no marcó nada pero hay correo -> forzamos CORREO
+  if (!expone && hayCorreo) {
+    expone = true;
+    tipo = "correo";
+  }
+
+  // 2) Si el modelo dice TARJETA pero NO hay correo -> descartamos (probable falso positivo)
+  if (expone && tipo === "tarjeta" && !hayCorreo) {
+    expone = false;
+    tipo = null;
+  }
+
+  // (Opcional) podrías usar hayCorreo/hayTarjeta para más reglas luego
+  return { expone, tipo, hayCorreo, hayTarjeta };
+}
+
+
+// ================= HU-12: Distancia de Levenshtein =================
+function levenshtein(s1, s2) {
+  const m = s1.length;
+  const n = s2.length;
+  const d = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+
+  for (let i = 0; i <= m; i++) d[i][0] = i;
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+
+  for (let j = 1; j <= n; j++) {
+    for (let i = 1; i <= m; i++) {
+      const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(
+        d[i - 1][j] + 1,       // borrado
+        d[i][j - 1] + 1,       // inserción
+        d[i - 1][j - 1] + cost // sustitución
+      );
+    }
+  }
+  return d[m][n];
+}
+
+// ================= HU-12: Analizador de enlaces en texto =================
+function hu12_analizarTextoParaLinks(texto) {
+  // Regex general para URLs
+  const urlRegex = /(https?:\/\/[^\s/$.?#].[^\s]*)/gi;
+  const urls = texto.match(urlRegex);
+
+  if (!urls) {
+    return { expone: false, tipo: null };
+  }
+
+  for (const urlStr of urls) {
+    try {
+      const url = new URL(urlStr);
+      const host = url.hostname.replace(/^www\./, "");
+
+      // 1. Acortadores
+      if (SHORTENER_DOMAINS.has(host)) {
+        return { expone: true, tipo: "shortlink" };
+      }
+
+      // 2. Typosquatting
+      if (LEGITIMATE_DOMAINS.has(host)) {
+        continue; // dominio legítimo exacto
+      }
+
+      // Comparamos contra todos los legítimos
+      for (const legit of LEGITIMATE_DOMAINS) {
+        const dist = levenshtein(host, legit);
+        if (dist > 0 && dist <= TYPO_THRESHOLD) {
+          return { expone: true, tipo: "typosquat" };
+        }
+      }
+    } catch (e) {
+      // URL inválida, ignoramos
+    }
+  }
+
+  return { expone: false, tipo: null };
+}
+
 
 
 // Intenta extraer texto semántico de un “campo” (input real o pseudo-input)
@@ -77,9 +199,19 @@ function textoCampoPlus(el) {
     // Padre con poco texto (evita contenedores gigantes)
     const parent = el.parentElement;
     if (parent && parent.textContent && parent.textContent.length < 300) {
-      acc.push(parent.textContent);
+      const clone = parent.cloneNode(true);
+      // Evitamos incluir el texto que el usuario está escribiendo (dentro de 'el')
+      const index = Array.from(parent.children).indexOf(el);
+      if (index !== -1 && clone.children[index]) {
+        clone.removeChild(clone.children[index]);
+      }
+      // Por si acaso, remover también otros inputs
+      const inputs = clone.querySelectorAll("input, textarea");
+      for (const n of inputs) n.remove();
+
+      acc.push(clone.textContent);
     }
-  } catch {}
+  } catch { }
 
   // Caso Steam: label visual en .DialogLabel cerca del input/botón
   try {
@@ -90,9 +222,9 @@ function textoCampoPlus(el) {
       const lab = steamAround.querySelector(".DialogLabel");
       if (lab) acc.push(lab.textContent || "");
     }
-  } catch {}
+  } catch { }
 
-  // Caso Roblox: bloques con .account-info-inline-label (no hay input editable hasta hacer click)
+  // Caso Roblox: bloques con .account-settings-text-field (no hay input editable hasta hacer click)
   try {
     const robloxField = el.closest(".account-settings-text-field");
     if (robloxField) {
@@ -105,7 +237,7 @@ function textoCampoPlus(el) {
       const h2 = robloxSection.querySelector(".setting-section-header");
       if (h2) acc.push(h2.textContent || "");
     }
-  } catch {}
+  } catch { }
 
   return (acc.join(" ") || "").trim();
 }
@@ -155,16 +287,38 @@ function paginaHabilitada() {
 }
 
 // =================== Omisión temporal (runtime) ===================
-const OMIT_MS = 30000; // 30s
+const OMIT_MS = 30000; // 30 segundos (estaba en 3000 = 3 segundos por error)
 let sesionEntrada = 0;
 const omitidosRuntime = new Map(); // tipo -> { until, sesion, input }
 
 function nuevaSesion(target) {
+  // Si el framework (ej. React) recreó el input, el nodo DOM cambia pero lógicamente es el mismo.
+  if (ultimoTarget && target && ultimoTarget !== target) {
+    let esMismoCampo = false;
+    if (ultimoTarget.name && target.name && ultimoTarget.name === target.name) esMismoCampo = true;
+    else if (ultimoTarget.id && target.id && ultimoTarget.id === target.id) esMismoCampo = true;
+    else {
+      const ctxAnterior = textoCampoPlus(ultimoTarget);
+      const ctxActual = textoCampoPlus(target);
+      if (ctxAnterior && ctxActual && ctxAnterior === ctxActual) esMismoCampo = true;
+    }
+
+    if (esMismoCampo) {
+      ultimoTarget = target; // Actualizar referencia DOM
+      return sesionEntrada;  // No cambiar de sesión
+    }
+  }
+
   sesionEntrada += 1;
   ultimoTarget = target || ultimoTarget;
+  colaDetecciones = []; // limpiar cola al cambiar de sesión/input
+
+  // Limpiamos solo los que ya expiraron por tiempo
+  const ahora = Date.now();
   for (const [tipo, info] of omitidosRuntime.entries()) {
-    if (info.sesion !== sesionEntrada) omitidosRuntime.delete(tipo);
+    if (info.until < ahora) omitidosRuntime.delete(tipo);
   }
+
   ignoradosUnicos = new Set(); // reinicia ignorados únicos por sesión
   return sesionEntrada;
 }
@@ -173,18 +327,46 @@ function silenciadoPorOmitir(tipo, target) {
   if (!info) return false;
   const ahora = Date.now();
   if (info.until && info.until < ahora) {
+    console.log(`[Omitir] Expiró el tiempo de ${tipo}.`);
     omitidosRuntime.delete(tipo);
     return false;
   }
-  if (info.input && target && info.input !== target) return false;
-  if (info.sesion !== sesionEntrada) return false;
+
+  if (info.input && target) {
+    if (info.input === target) {
+      console.log(`[Omitir] Silenciado ${tipo} (mismo input exacto). Faltan ${((info.until - ahora) / 1000).toFixed(1)}s`);
+      return true;
+    }
+
+    if (info.input.name && target.name && info.input.name === target.name) {
+      console.log(`[Omitir] Silenciado ${tipo} (mismo name: ${target.name}). Faltan ${((info.until - ahora) / 1000).toFixed(1)}s`);
+      return true;
+    }
+    if (info.input.id && target.id && info.input.id === target.id) {
+      console.log(`[Omitir] Silenciado ${tipo} (mismo id: ${target.id}). Faltan ${((info.until - ahora) / 1000).toFixed(1)}s`);
+      return true;
+    }
+
+    const ctxAnterior = textoCampoPlus(info.input);
+    const ctxActual = textoCampoPlus(target);
+    if (ctxAnterior && ctxActual && ctxAnterior === ctxActual) {
+      console.log(`[Omitir] Silenciado ${tipo} (mismo contexto). Faltan ${((info.until - ahora) / 1000).toFixed(1)}s`);
+      return true;
+    }
+
+    console.log(`[Omitir] No silenciado ${tipo} (es distinto input). Anterior:`, info.input, `Nuevo:`, target);
+    return false;
+  }
+
+  if (info.sesion !== sesionEntrada) {
+    console.log(`[Omitir] No silenciado ${tipo} (distinta sesión). info: ${info.sesion}, actual: ${sesionEntrada}`);
+    return false;
+  }
+
+  console.log(`[Omitir] Silenciado ${tipo} (por sesión). Faltan ${((info.until - ahora) / 1000).toFixed(1)}s`);
   return true;
 }
-function resetOmisionesAlCambiarTipo(tipoActual) {
-  for (const [tipo] of omitidosRuntime.entries()) {
-    if (tipo !== tipoActual) omitidosRuntime.delete(tipo);
-  }
-}
+// Eliminado: resetOmisionesAlCambiarTipo (causaba que se borraran omisiones prematuramente)
 
 // =================== Historial (mínimo requerido) ===================
 const HIST_KEY = "historialAvisos";
@@ -225,13 +407,48 @@ async function registrarAccionYCerrar(accion, { forceClose = false } = {}) {
     limpiarAviso({ respectHover: !forceClose });
     _cerrandoAviso = false;
   }
+  limpiarAviso({ respectHover: !forceClose });
 }
 
 // =================== Evento principal (con debounce) ===================
+let ignorarEventosProgramaticos = false;
+
+// Listener para inputs y textareas estándar
 document.addEventListener("input", (event) => {
+  if (ignorarEventosProgramaticos) return;
+  const target = event.target;
   clearTimeout(inputDebounceId);
-  inputDebounceId = setTimeout(() => onUserInput(event), 250);
+  inputDebounceId = setTimeout(() => {
+    onUserInput(target);
+  }, 500);
 });
+
+// Listener adicional para contenteditable (ej. chat de Discord con Slate.js).
+// Usamos 'keyup' en modo capture porque Slate.js puede consumir el evento 'input'
+// antes de que llegue al document, o dispararlo en nodos internos.
+document.addEventListener("keyup", (event) => {
+  if (ignorarEventosProgramaticos) return;
+  const target = event.target;
+  // Solo actuar sobre elementos dentro de un contenteditable
+  if (!target?.isContentEditable) return;
+  // Ignorar teclas de navegación/modificadores que no cambian texto
+  const ignore = ["Shift", "Control", "Alt", "Meta", "CapsLock", "Tab",
+    "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+    "Home", "End", "PageUp", "PageDown", "Escape", "F1",
+    "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"];
+  if (ignore.includes(event.key)) return;
+  clearTimeout(inputDebounceId);
+  inputDebounceId = setTimeout(() => {
+    onUserInput(target);
+  }, 500);
+}, true); // capture = true para llegar antes que Slate.js
+
+// HU07: detectar nombres de archivo sensibles al seleccionar un archivo
+document.addEventListener("change", (event) => {
+  // Usamos capture para agarrar cambios en inputs dentro de modales/iframes embebidos
+  onFileSelected(event);
+}, true);
+
 
 document.addEventListener("copy", async (event) => {
   try {
@@ -257,6 +474,9 @@ document.addEventListener("copy", async (event) => {
       // fallback: selección visible
       texto = (window.getSelection()?.toString() || "").trim();
     }
+
+    // Ignorar datos que ya están enmascarados
+    texto = limpiarDatosEnmascarados(texto);
     if (!texto || texto.length < 5) return; // ignora cosas muy cortas
 
     // mantener la misma noción de sesión/target (no forzamos nueva sesión)
@@ -286,16 +506,11 @@ document.addEventListener("copy", async (event) => {
       return;
     }
 
-    if (ultimoTipoDetectado && ultimoTipoDetectado !== tipo) {
-      resetOmisionesAlCambiarTipo(tipo);
-    }
-
     ultimosMatches = detectarMatches(texto, tipo);
     const { vulnerabilidad, recomendacion } = mensajesPorTipo(tipo);
     ultimoTipoDetectado = tipo;
     const titulo = `⚠ ${tipo.toUpperCase()} detectado (copiado)`;
 
-    // Reemplazo: cerrar aunque haya hover para evitar superposición
     mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo });
 
   } catch (e) {
@@ -305,6 +520,7 @@ document.addEventListener("copy", async (event) => {
 
 // --- HU08: Escáner de formularios/sections con múltiples datos sensibles ---
 let scanFormsDebounceId = null;
+let hu08MostradoEnPagina = false;
 
 function scheduleScanForms() {
   clearTimeout(scanFormsDebounceId);
@@ -342,7 +558,17 @@ function contarCategoriasSensiblesEn(container) {
   }
 
   // Fallback: también escanea headers/labels de la sección
-  const textoSeccion = (container.textContent || "").slice(0, 2000); // recorta por rendimiento
+  // Evitamos leer el texto de los inputs del usuario
+  let textoSeccion = "";
+  try {
+    const clone = container.cloneNode(true);
+    const inputs = clone.querySelectorAll("input, textarea, [contenteditable='true']");
+    for (const n of inputs) n.remove();
+    textoSeccion = (clone.textContent || "").slice(0, 2000); // recorta por rendimiento
+  } catch (e) {
+    textoSeccion = (container.textContent || "").slice(0, 2000);
+  }
+
   for (const [cat, re] of Object.entries(KW)) {
     if (re.test(textoSeccion)) tiposDetectados.add(cat);
   }
@@ -369,11 +595,13 @@ function scanFormsForSensitive() {
 
       const { sensiblesCount, tiposDetectados } = contarCategoriasSensiblesEn(container);
       if (sensiblesCount >= 2) {
+        if (hu08MostradoEnPagina) return;
+
         // Respeta omisión temporal por tipo “multiple_campos”
         if (silenciadoPorOmitir("multiple_campos", container)) continue;
 
         const lista = Array.from(tiposDetectados).join(", ");
-        const vulnerabilidad = `Este formulario solicita **múltiples datos sensibles**: ${lista}.`;
+        const vulnerabilidad = `Este formulario solicita *múltiples datos sensibles* como ${lista}.`;
         const recomendacion = "Revisa la política del sitio y comparte solo lo necesario. Evita pegar datos en chats públicos.";
 
         const titulo = "⚠ Formulario solicita múltiples datos sensibles";
@@ -382,12 +610,13 @@ function scanFormsForSensitive() {
 
         mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo: "multiple_campos" });
         formLastShown.set(container, Date.now());
+        hu08MostradoEnPagina = true;
       }
     } catch { /* noop */ }
   }
 }
 
-// Observer para páginas dinámicas (React/Vue): Roblox/Steam/Discord
+// Observer para páginas dinámicas (): Roblox/Steam/Discord
 const mo = new MutationObserver(() => scheduleScanForms());
 mo.observe(document.documentElement, { childList: true, subtree: true });
 
@@ -411,18 +640,38 @@ if (document.readyState === "loading") {
 }
 
 
+// =================== Manejo de input con control de relevancia ===================
 
-
-async function onUserInput(event) {
-  const target = event.target;
-
+function onUserInput(target) {
   if (!state.activo || !paginaHabilitada()) return;
-  if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA") return;
 
-  const texto = (target.value || "").trim();
-  if (texto.length < 10) {
+  // Soporte para contenteditable (ej. chat de Discord)
+  const esContentEditable = !!target?.isContentEditable;
+  if (!target || (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA" && !esContentEditable)) return;
+
+  // Ignorar inputs de tipo password
+  if (target.tagName === "INPUT" && target.type === "password") return;
+
+  let texto;
+  if (esContentEditable) {
+    // Subir hasta el nodo contenteditable raíz para leer el texto completo.
+    // Slate.js (Discord) puede disparar el evento en un <span> interno;
+    // si usamos solo ese nodo obtendríamos texto parcial.
+    let root = target;
+    while (root && root !== document.body) {
+      if (root.getAttribute?.("contenteditable") === "true") break;
+      root = root.parentElement;
+    }
+    texto = (root?.textContent || "").trim();
+  } else {
+    texto = (target.value || "").trim();
+  }
+
+  // ID de solicitud para invalidar resultados viejos
+  const solicitudId = ++ultimaSolicitudId;
+
+  if (texto.length < 5) {
     if (ultimoTarget !== target) nuevaSesion(target);
-    // Cierre inmediato aunque esté en hover (ya no expone)
     limpiarAviso({ respectHover: false });
     return;
   }
@@ -431,67 +680,394 @@ async function onUserInput(event) {
     nuevaSesion(target);
   }
 
+  ejecutarAnalisisTexto(texto, target, solicitudId);
+}
+
+async function ejecutarAnalisisTexto(textoOriginal, target, solicitudId) {
   try {
-    // pedir al modelo ONNX interno (sin backend)
+    if (solicitudId !== ultimaSolicitudId) return;
+
+    // Limpiamos los datos que ya están enmascarados para no volver a detectarlos
+    const texto = limpiarDatosEnmascarados(textoOriginal);
+    if (!texto.trim() || texto.length < 5) return;
+
+    // ── Fase 1: regex — detecta TODOS los tipos explícitos presentes ───────────────
+    // Correo, DNI, tarjeta tienen patrones únicos verificables con regex.
+    // Si se detectan varios, se encolan y se muestran uno a uno.
+    const tiposEncontrados = detectarTiposDato(texto);
+    const itemsCola = tiposEncontrados
+      .filter(t => state.tipos?.[t] && !silenciadoPorOmitir(t, target))
+      .map(t => ({
+        tipo: t,
+        matches: detectarMatches(texto, t),
+        ...mensajesPorTipo(t)
+      }));
+
+    if (itemsCola.length > 0) {
+      colaDetecciones = itemsCola;
+      colaTarget = target;
+      colaTexto = texto;
+      procesarSiguienteDeLaCola();
+      return; // no hace falta correr el modelo
+    }
+
+    // ── Fase 0.5: contexto del campo (ajustes/perfil) ─────────────────────────────
+    const textoContexto = textoCampoPlus(target);
+    const tipoContexto = clasificarCategoriaPorTexto(textoContexto);
+    if (tipoContexto && state.tipos?.[tipoContexto] && !silenciadoPorOmitir(tipoContexto, target)) {
+      ultimosMatches = [];
+      ultimoTipoDetectado = tipoContexto;
+      colaDetecciones = [];
+      const sitio = location.hostname.replace(/^www\./, "");
+      const { vulnerabilidad: vc, recomendacion: rc } = mensajesPorContextoCampo(tipoContexto, sitio);
+      mostrarAviso(`⚠ Campo sensible: ${tipoContexto.toUpperCase()}`, vc, rc, { tipo: tipoContexto });
+      return;
+    }
+
+    // ── Fase 2: modelo ONNX (nombre + casos que el regex no cubre) ──────────────
+    // Evitamos ejecutar el modelo en páginas de configuración/perfil donde se asume
+    // que el usuario completará sus datos personales explícitamente.
+    const urlStr = location.href.toLowerCase();
+    if (
+      urlStr.includes("accounts.epicgames.com/account/personal") ||
+      urlStr.includes("roblox.com/my/account") ||
+      (urlStr.includes("steamcommunity.com/id/") && urlStr.includes("/edit"))
+    ) {
+      return;
+    }
+
+    await new Promise(r => setTimeout(r, 0)); // ceder hilo antes de inferencia
+    if (solicitudId !== ultimaSolicitudId) return;
+
+    const start = performance.now();
     const data = await analizarTextoML(texto);
-    // data: { expone: boolean, tipo: "dni"|"tarjeta"|"nombre"|"correo"|null }
+    console.log(`[ML] Tiempo de inferencia: ${performance.now() - start} ms`);
+
+    if (solicitudId !== ultimaSolicitudId) return;
 
     const expone = !!data?.expone;
     let tipo = data?.tipo || "";
     if (expone && (!tipo || !state.tipos?.[tipo])) {
       tipo = detectarTipoDato(texto); // fallback local
     }
+    console.log("[ONNX]", data, "| expone:", expone, "| tipo:", tipo);
 
-    // DEBUG
-    console.log("[BACKEND]", data, "| expone:", expone, "| tipo:", tipo);
-
-    // Cierres que deben ser inmediatos (ignoran hover)
-    if (!expone || !tipo || tipo === "ninguno") {
-      limpiarAviso({ respectHover: false });
-      return;
-    }
-    if (!state.tipos?.[tipo]) {
-      limpiarAviso({ respectHover: false });
-      return;
-    }
-    if (silenciadoPorOmitir(tipo, target)) {
+    if (!expone || !tipo || tipo === "ninguno" || !state.tipos?.[tipo]
+      || silenciadoPorOmitir(tipo, target)) {
       limpiarAviso({ respectHover: false });
       return;
     }
 
-    if (ultimoTipoDetectado && ultimoTipoDetectado !== tipo) {
-      resetOmisionesAlCambiarTipo(tipo);
-    }
-
+    colaDetecciones = []; // un solo resultado del modelo, sin cola
     ultimosMatches = detectarMatches(texto, tipo);
-    const { vulnerabilidad, recomendacion } = mensajesPorTipo(tipo);
     ultimoTipoDetectado = tipo;
-    const titulo = `⚠ ${tipo.toUpperCase()} detectado`;
-
-    // Reemplazo: cerramos aunque el mouse esté encima (evita superposiciones)
-    mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo });
+    const { vulnerabilidad, recomendacion } = mensajesPorTipo(tipo);
+    mostrarAviso(`⚠ ${tipo.toUpperCase()} detectado`, vulnerabilidad, recomendacion, { tipo });
 
   } catch (err) {
-    console.error("Error al analizar con el modelo ONNX:", err);
+    // ── Fallback: WASM no disponible (CSP restrictiva en Roblox, Discord, etc.) ──
+    console.warn("[ML] ONNX no disponible, usando heurística local:", err.message);
+    if (solicitudId !== ultimaSolicitudId) return;
+    const itemsFallback = detectarTiposDato(texto)
+      .filter(t => state.tipos?.[t] && !silenciadoPorOmitir(t, target))
+      .map(t => ({ tipo: t, matches: detectarMatches(texto, t), ...mensajesPorTipo(t) }));
+    if (itemsFallback.length > 0) {
+      colaDetecciones = itemsFallback;
+      colaTarget = target;
+      colaTexto = texto;
+      procesarSiguienteDeLaCola();
+    }
   }
 }
 
+// === HU07: alerta por nombres de archivo sensibles ===
+async function onFileSelected(event) {
+  const input = event.target;
+
+  console.log("[HU07] change disparado en:", input);
+
+  if (!state.activo || !paginaHabilitada()) {
+    console.log("[HU07] Extensión inactiva o página no habilitada");
+    return;
+  }
+
+  if (!input || input.tagName !== "INPUT" || input.type !== "file") {
+    return;
+  }
+
+  // Función que hace TODO el análisis dado un archivo
+  const procesarArchivo = async (file) => {
+    if (!file || !file.name) {
+      console.log("[HU07] procesarArchivo: archivo inválido");
+      return;
+    }
+
+    const rawName = file.name;
+    console.log("[HU07] Nombre de archivo seleccionado:", rawName);
+
+    // Normalizar nombre: quitar acentos, guiones, underscores, pasar a minúsculas
+    let normalizado = rawName
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")  // sin acentos
+      .replace(/[_\-\.]+/g, " ")                        // _ - . -> espacio
+      .toLowerCase()
+      .trim();
+
+    console.log("[HU07] Nombre normalizado:", normalizado);
+
+    if (!normalizado || normalizado.length < 3) {
+      return;
+    }
+
+    // --- Heurística rápida por palabras clave (dni, pasaporte, passport, carnet, etc.) ---
+    const patronSensibles = /(dni|documento\s*de\s*identidad|id\b|pasaporte|passport|carnet|extranj(er[ia]|eria)|licencia|license)/i;
+
+    let expone = false;
+    let tipoHeuristico = null;
+
+    if (patronSensibles.test(normalizado)) {
+      expone = true;
+      if (normalizado.includes("dni")) tipoHeuristico = "dni";
+      else if (normalizado.includes("pasaporte") || normalizado.includes("passport")) tipoHeuristico = "dni";
+      else tipoHeuristico = "nombre"; // fallback genérico
+    }
+
+    // Intentar también con el modelo (no es muy pesado, se ejecuta solo 1 vez por selección)
+    try {
+      const resultadoML = await analizarTextoML(normalizado);
+      console.log("[HU07] Resultado modelo para nombre archivo:", resultadoML);
+
+      if (resultadoML?.expone && resultadoML?.tipo && state.tipos?.[resultadoML.tipo]) {
+        expone = true;
+        tipoHeuristico = resultadoML.tipo;
+      }
+    } catch (err) {
+      console.error("[HU07] Error llamando al modelo para nombre de archivo:", err);
+    }
+
+    if (!expone || !tipoHeuristico || tipoHeuristico === "ninguno") {
+      console.log("[HU07] Nombre de archivo no considerado sensible");
+      return;
+    }
+
+    // Asociamos la sesión al input file para que el aviso sepa "dónde" ocurrió
+    if (ultimoTarget !== input) {
+      nuevaSesion(input);
+    }
+
+    ultimoTipoDetectado = tipoHeuristico;
+    ultimosMatches = [rawName];
+
+    const titulo = "⚠ Nombre de archivo posiblemente sensible";
+    const vulnerabilidad = `El archivo <b>"${escapeHTML(rawName)}"</b> parece incluir <b>${escapeHTML(tipoHeuristico)}</b> u otro dato personal en su nombre.`;
+    const recomendacion = "Antes de subirlo, revisa que no contenga datos como DNI, pasaporte, correos o tarjetas.";
+
+    console.log("[HU07] Mostrando aviso por nombre de archivo sensible");
+
+    mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo: tipoHeuristico });
+  };
+
+  // 1) Intento inmediato
+  let file = input.files && input.files[0];
+  if (file && file.name) {
+    console.log("[HU07] Archivo detectado al primer intento");
+    await procesarArchivo(file);
+    return;
+  }
+
+  // 2) Si no hay archivo aún, reintentamos unas cuantas veces (Steam puede tocar el input raro)
+  console.log("[HU07] No hay archivo seleccionado en el momento del change, reintentando...");
+
+  let intentos = 5;
+  const delayMs = 150;
+
+  const reintentar = () => {
+    const f = input.files && input.files[0];
+    if (f && f.name) {
+      console.log("[HU07] Archivo detectado en reintento:", f.name);
+      procesarArchivo(f);
+      return;
+    }
+
+    intentos--;
+    if (intentos > 0) {
+      setTimeout(reintentar, delayMs);
+    } else {
+      console.log("[HU07] No se detectó archivo tras reintentos");
+    }
+  };
+
+  reintentar();
+}
+
+// ================= HU07 - Fallback para Steam: botón "Sube tu avatar" =================
+
+let steamAvatarWarningShown = false;
+
+function setupSteamAvatarWarning() {
+  // Solo aplica en Steam Community
+  if (!location.hostname.includes("steamcommunity.com")) return;
+
+  function hookButtons() {
+    const buttons = document.querySelectorAll("button.DialogButton");
+
+    for (const btn of buttons) {
+      const text = (btn.textContent || "").trim().toLowerCase();
+      // Buscamos específicamente el botón "Sube tu avatar"
+      if (!/sube tu avatar/i.test(text)) continue;
+
+      // Evitar enganchar el mismo botón más de una vez
+      if (btn._hu07SteamHooked) continue;
+      btn._hu07SteamHooked = true;
+
+      btn.addEventListener("click", () => {
+        if (!state.activo || !paginaHabilitada()) return;
+
+        // Si ya mostramos la advertencia una vez en esta sesión, no spamear
+        if (steamAvatarWarningShown) return;
+        steamAvatarWarningShown = true;
+
+        // Asociamos la "sesión" al propio botón, para que el aviso se ancle al contexto
+        try {
+          if (typeof nuevaSesion === "function") {
+            nuevaSesion(btn);
+          }
+        } catch (e) {
+          console.warn("[HU07 Steam] Error llamando a nuevaSesion:", e);
+        }
+
+        const titulo = "Revisa el nombre del archivo antes de subirlo";
+        const vulnerabilidad =
+          'Evita nombres de archivos que incluyan datos personales como ' +
+          '<b>DNI</b>, <b>pasaporte</b>, <b>correo</b> o <b>teléfono</b> ' +
+          '(por ejemplo: <code>dni_45874568.png</code>).';
+        const recomendacion =
+          "Si tu avatar tiene un nombre sensible, renómbralo antes de subirlo para proteger tu información.";
+
+        try {
+          mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo: "ninguno" });
+        } catch (e) {
+          console.error("[HU07 Steam] Error mostrando aviso:", e);
+        }
+      });
+    }
+  }
+
+  // Intento inicial
+  hookButtons();
+
+  // Steam suele re-renderizar el DOM, así que usamos MutationObserver
+  const mo = new MutationObserver(() => {
+    hookButtons();
+  });
+
+  mo.observe(document.documentElement, {
+    childList: true,
+    subtree: true
+  });
+}
+
+// Llamar esto en la inicialización del content script
+setupSteamAvatarWarning();
+
+
+
+// ================= VALIDACION DE TARJETAS (ESTRICTA) =================
+function validarTarjeta(str) {
+  const digits = str.replace(/\D/g, "");
+  // Prefijos: Visa (4), Mastercard (51-55), Discover (6011, 65), Amex (34, 37)
+  if (!/^(?:4\d{12}(?:\d{3})?|5[1-5]\d{14}|3[47]\d{13}|6(?:011|5\d{2})\d{12})$/.test(digits)) return false;
+  
+  // Algoritmo de Luhn
+  let sum = 0;
+  let alternate = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let n = parseInt(digits[i], 10);
+    if (alternate) {
+      n *= 2;
+      if (n > 9) n = (n % 10) + 1;
+    }
+    sum += n;
+    alternate = !alternate;
+  }
+  return sum % 10 === 0;
+}
+
+function extraerTarjetasValidas(texto) {
+  // Captura secuencias largas de números que parecen tarjetas
+  const re = /(?:^|[^\d])((?:\d[ \-]?){13,19})(?=[^\d]|$)/g;
+  const matches = [];
+  let m;
+  while ((m = re.exec(texto)) !== null) {
+    const candidato = m[1].trim();
+    if (validarTarjeta(candidato)) {
+      matches.push(candidato);
+    }
+  }
+  return matches;
+}
+
+// ================= LIMPIEZA DE DATOS YA ENMASCARADOS =================
+function limpiarDatosEnmascarados(texto) {
+  if (!texto) return "";
+  let t = String(texto);
+  // Correo: letra/numero seguido de asteriscos y luego @ (ej. j***@correo.com)
+  t = t.replace(/\b[a-z0-9]\*+@[a-z0-9.\-]+\.[a-z]{2,}\b/gi, " ");
+  // DNI: asteriscos seguidos de 1 a 4 digitos finales (ej. ******12 o *****834)
+  t = t.replace(/\b\*+\d{1,4}\b/g, " ");
+  // Tarjeta: bloques de asteriscos seguidos de 4 digitos finales (ej. **** **** **** 1234)
+  t = t.replace(/(?:\*+[ \-]?){3,}\d{4}\b/g, " ");
+  return t;
+}
+
 // ========= Detecciones / ejemplos / enmascarado =========
+// Detecta el PRIMER tipo (para fallback y operaciones simples)
 function detectarTipoDato(texto) {
   texto = (texto || "").toLowerCase();
   if (/\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b/.test(texto)) return "correo";
-  if (/\b\d{7,9}\b/.test(texto)) return "dni";
-  if (/\b(?:\d[ \-]?){13,19}\b/.test(texto)) return "tarjeta";
-  if (/\b(?!.*[@\d])([A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}){1,3})\b/.test(texto)) return "nombre";
+  // DNI: estricto a 8 dígitos exactos, otros tamaños van al modelo ML
+  if (/\b\d{8}\b/.test(texto)) return "dni";
+  if (extraerTarjetasValidas(texto).length > 0) return "tarjeta";
+  // "nombre" solo lo detecta el modelo (evitar falsos positivos con regex)
   return "ninguno";
 }
+
+// Detecta TODOS los tipos presentes en el texto (para la cola de avisos)
+function detectarTiposDato(texto) {
+  const tipos = [];
+  const t = (texto || "").toLowerCase();
+  if (/\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b/.test(t)) tipos.push("correo");
+  // DNI: estricto a 8 dígitos exactos
+  if (/\b\d{8}\b/.test(t)) tipos.push("dni");
+  if (extraerTarjetasValidas(t).length > 0) tipos.push("tarjeta");
+  return tipos;
+}
+
+// Muestra el siguiente aviso de la cola (se llama tras Omitir o tras cerrar post-Aceptar)
+function procesarSiguienteDeLaCola() {
+  while (colaDetecciones.length) {
+    const item = colaDetecciones.shift();
+    if (!state.tipos?.[item.tipo]) continue;              // tipo desactivado en ajustes
+    if (silenciadoPorOmitir(item.tipo, colaTarget)) continue; // ya omitido
+    ultimosMatches = item.matches;
+    ultimoTipoDetectado = item.tipo;
+    mostrarAviso(
+      `⚠ ${item.tipo.toUpperCase()} detectado`,
+      item.vulnerabilidad,
+      item.recomendacion,
+      { tipo: item.tipo }
+    );
+    return;
+  }
+  // Cola vacía — no hay más tipos pendientes
+}
+
 function detectarMatches(texto, tipo) {
   if (!texto) return [];
   let re;
   switch (tipo) {
-    case "correo":  re = /\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b/gi; break;
-    case "dni":     re = /\b\d{7,9}\b/g; break;
-    case "tarjeta": re = /\b(?:\d[ \-]?){13,19}\b/g; break; // sin Luhn aquí
+    case "correo": re = /\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b/gi; break;
+    case "dni": re = /\b\d{7,9}\b/g; break; // Se usa sólo para extraer/enmascarar cuando el ML lo detecta
+    case "tarjeta": re = /\b(?:\d[ \-]?){13,19}\b/g; break; // Regex laxo para extraer y permitir enmascarar tarjetas inválidas detectadas por ML
     case "nombre":
       re = /\b(?!.*[@\d])([A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}){1,3})\b/gi;
       break;
@@ -509,18 +1085,52 @@ function mensajesPorTipo(tipo) {
       return { vulnerabilidad: "Posible número de tarjeta detectado.", recomendacion: "No escribas números de tarjeta en ningún campo de texto no seguro." };
     case "nombre":
       return { vulnerabilidad: "Exposición de nombre.", recomendacion: "Evita publicar tu nombre completo en foros o juegos públicos." };
-    case "multiple_campos": // <--- NUEVO
+    case "multiple_campos":
       return { vulnerabilidad: "Este formulario solicita múltiples datos sensibles.", recomendacion: "Revisa la política del sitio y comparte solo lo necesario." };
     default:
       return { vulnerabilidad: "Dato potencialmente sensible detectado.", recomendacion: "Evita compartir información personal en espacios públicos." };
   }
 }
+
+// Mensajes para detección por CONTEXTO del campo (configuración/perfil)
+// Se usa cuando el campo mismo indica el tipo (label, placeholder, etc.)
+// pero el valor aún no forma un patrón reconocible.
+function mensajesPorContextoCampo(tipo, sitio) {
+  const en = sitio ? ` en <b>${escapeHTML(sitio)}</b>` : "";
+  switch (tipo) {
+    case "correo":
+      return {
+        vulnerabilidad: `Estás ingresando tu <b>correo electrónico</b>${en}. Este dato quedará guardado en los servidores del sitio.`,
+        recomendacion: "Asegúrate de estar en el sitio correcto y que la URL comience con <b>https</b>."
+      };
+    case "nombre":
+      return {
+        vulnerabilidad: `Estás ingresando tu <b>nombre real</b>${en}. Este dato puede ser visible para otros usuarios.`,
+        recomendacion: "Considera si el sitio realmente necesita tu nombre real o si puedes usar un alias."
+      };
+    case "dni":
+      return {
+        vulnerabilidad: `Este campo parece solicitar tu <b>número de identidad</b>${en}.`,
+        recomendacion: "Comparte tu DNI/cédula solo en sitios de confianza que lo requieran legalmente."
+      };
+    case "tarjeta":
+      return {
+        vulnerabilidad: `Este campo parece solicitar datos de <b>tarjeta de pago</b>${en}.`,
+        recomendacion: "Verifica que el sitio tenga certificado SSL y sea una plataforma de pago legítima."
+      };
+    default:
+      return {
+        vulnerabilidad: `Estás ingresando datos potencialmente sensibles en este campo${en}.`,
+        recomendacion: "Asegúrate de confiar en este sitio antes de compartir información personal."
+      };
+  }
+}
 function ejemplosEnmascarados(tipo) {
   switch (tipo) {
-    case "correo":  return ["j***@correo.com", "m*****.p****@dominio.pe", "u*****+promo@ejemplo.org"];
-    case "dni":     return ["******12", "*****834", "******90"];
+    case "correo": return ["j***@correo.com", "m*****.p****@dominio.pe", "u*****+promo@ejemplo.org"];
+    case "dni": return ["******12", "*****834", "******90"];
     case "tarjeta": return ["**** **** **** 1234", "****-****-****-9876", "************4321"];
-    case "nombre":  return [];
+    case "nombre": return [];
     default: return [];
   }
 }
@@ -550,9 +1160,24 @@ function enmascararValorEnInput(input, tipo) {
       return;
   }
   input.value = nuevo;
+
+  // Disparamos eventos para que la página web sepa que el texto cambió, 
+  // pero marcamos que nosotros lo hicimos para no desatar análisis infinitos ni resetear la cola.
+  ignorarEventosProgramaticos = true;
+  const eventos = ['input', 'change', 'blur'];
+  eventos.forEach(tipoEvento => {
+    input.dispatchEvent(new Event(tipoEvento, { bubbles: true }));
+  });
+
+  // Liberamos la bandera después de un margen de tiempo para que los listeners de la página terminen
+  setTimeout(() => {
+    ignorarEventosProgramaticos = false;
+  }, 200);
 }
 
 // ========= UI del aviso + historial =========
+let blurListenerActual = null;
+
 function clearTimers() {
   clearTimeout(autoCloseTimerId);
   clearTimeout(postAceptarTimerId);
@@ -580,10 +1205,17 @@ function limpiarAviso({ respectHover = false } = {}) {
   clearTimers();
 
   if (avisoActivo) {
-    try { avisoActivo.remove(); } catch {}
-    avisoActivo = null;
+    const el = avisoActivo;
+    avisoActivo = null; // liberamos para no bloquear siguientes
+    el.style.opacity = "0";
+    setTimeout(() => { try { el.remove(); } catch { } }, 400);
   }
   avisoPendiente = null;
+
+  if (blurListenerActual) {
+    if (ultimoTarget) ultimoTarget.removeEventListener("blur", blurListenerActual);
+    blurListenerActual = null;
+  }
 }
 
 function startAutoClose() {
@@ -601,76 +1233,229 @@ function stopAutoClose() {
   // No limpiamos el tope duro: debe cumplirse sí o sí
 }
 
-function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
+// ==========================================================
+// ============ INYECCIÓN DE ESTILOS CSS ====================
+// ==========================================================
+function inyectarEstilosAviso() {
+  if (document.getElementById("extension-privacidad-styles")) return;
+  const style = document.createElement("style");
+  style.id = "extension-privacidad-styles";
+  style.textContent = `
+    @keyframes priv-slide-up {
+      0% { opacity: 0; transform: translateY(15px) scale(0.97); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .priv-alert {
+      --bg: #FFE100;
+      --border: #F1D400;
+      --shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+      --text-main: #1F2023;
+      --text-sub: #3A3B40;
+      --bg-success: #dcfce7;
+      --border-success: #bbf7d0;
+      --text-success: #166534;
+      --bg-ignored: #f3f4f6;
+      --border-ignored: #e5e7eb;
+      --text-ignored: #374151;
+    }
+    .priv-alert.priv-alert-dark {
+      --bg: #EAC900;
+      --border: #D1B300;
+      --shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+      --text-main: #0A0A0A;
+      --text-sub: #222222;
+      --bg-success: #064e3b;
+      --border-success: #047857;
+      --text-success: #a7f3d0;
+      --bg-ignored: #27272a;
+      --border-ignored: #3f3f46;
+      --text-ignored: #e5e7eb;
+    }
+    .priv-alert {
+      background-color: var(--bg);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      color: var(--text-main);
+      transition: opacity 0.3s ease, background-color 0.4s ease, border-color 0.4s ease, transform 0.4s ease;
+      animation: priv-slide-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      box-sizing: border-box;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    .priv-alert p { margin: 0; line-height: 1.4; }
+    .priv-alert-btn {
+      flex: 1;
+      padding: 10px 14px;
+      border-radius: 30px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s ease;
+      font-family: inherit;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 6px;
+    }
+    .priv-alert-btn-aceptar {
+      background: linear-gradient(135deg, #D400FF, #2600FF);
+      color: #ffffff;
+      box-shadow: 0 4px 12px rgba(38, 0, 255, 0.3);
+    }
+    .priv-alert-btn-aceptar:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(38, 0, 255, 0.4);
+      filter: brightness(1.1);
+    }
+    .priv-alert-btn-omitir {
+      background: linear-gradient(135deg, #D400FF, #FF0004);
+      color: #ffffff;
+      box-shadow: 0 4px 12px rgba(255, 0, 4, 0.3);
+    }
+    .priv-alert-btn-omitir:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(255, 0, 4, 0.4);
+      filter: brightness(1.1);
+    }
+    .priv-alert-btn-neutral {
+      background: rgba(255, 255, 255, 0.5);
+      color: #1F2023;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+    }
+    .priv-alert-btn-neutral:hover {
+      background: rgba(255, 255, 255, 0.8);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    }
+    .priv-alert-close:hover { opacity: 1 !important; transform: scale(1.1); }
+  `;
+  document.head.appendChild(style);
+}
+
+// ==========================================================
+// ============ FUNCIÓN mostrarAviso UNIFICADA =============
+//    (con posición + tema + historial + enmascarado)
+// ==========================================================
+async function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
   // Reemplazo: cerramos aunque el mouse esté encima (evita superposiciones)
   limpiarAviso({ respectHover: false });
+  inyectarEstilosAviso();
 
   const aviso = document.createElement("div");
-  aviso.classList.add("aviso-proteccion");
+  aviso.className = "priv-alert";
   aviso.setAttribute("id", "aviso-proteccion");
 
-  // Tooltip para "Vulnerabilidad"
-  const tooltipIcon = `<span title="Punto débil por donde pueden robar tus datos" style="cursor:help;margin-left:6px;">🛈</span>`;
+  // Tooltip SVG Icon
+  const tooltipIcon = `<span title="Punto débil por donde pueden robar tus datos" style="cursor:help;margin-left:4px;opacity:0.75;font-size:13px;">🛈</span>`;
 
   aviso.innerHTML = `
-    <strong style="font-size:16px;display:block;margin-bottom:6px;">${titulo}</strong>
-    <p style="margin:0 0 8px 0"><b>Vulnerabilidad${tooltipIcon}:</b><br>${vulnerabilidad}</p>
-    <p style="margin:0 0 12px 0"><b>Recomendación:</b><br>${recomendacion}</p>
-
-    <div class="acciones-inferiores" id="acciones-inferiores" style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:8px;">
-      <button id="btn-omitir" type="button">Omitir</button>
-      <button id="btn-aceptar" type="button">Aceptar</button>
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+      <strong style="font-size:16px; font-weight:700;">${titulo}</strong>
+      <button class="priv-alert-close" id="btn-cerrar-aviso" type="button" style="background:transparent; border:none; color:inherit; opacity:0.6; font-size:24px; cursor:pointer; line-height:1; padding:0; margin-top:-4px; transition: all 0.2s;">&times;</button>
     </div>
-
-    <div id="zona-extra" style="margin-top:10px;display:none;">
-      <button id="btn-ver-ejemplos" type="button" style="margin-bottom:8px; width:100%;">Ver ejemplos</button>
-      <div id="contenedor-ejemplos" style="display:none; font-family:monospace; font-size:13px; margin-bottom:8px;"></div>
+    <p style="font-size:14px; color:var(--text-main); margin:0 0 8px 0; font-weight:600;">
+      Vulnerabilidad${tooltipIcon}:<br>
+      <span style="font-weight:400; color:var(--text-sub); display:inline-block; margin-top:3px; line-height:1.4;">${vulnerabilidad}</span>
+    </p>
+    <p style="font-size:14px; color:var(--text-main); margin:0 0 16px 0; font-weight:600;">
+      Recomendación:<br>
+      <span style="font-weight:400; color:var(--text-sub); display:inline-block; margin-top:3px; line-height:1.4;">${recomendacion}</span>
+    </p>
+    
+    <div class="acciones-inferiores" id="acciones-inferiores" style="display:flex; gap:10px; align-items:center;">
+      <button class="priv-alert-btn priv-alert-btn-omitir" id="btn-omitir" type="button">Omitir</button>
+      <button class="priv-alert-btn priv-alert-btn-aceptar" id="btn-aceptar" type="button">Aceptar</button>
+    </div>
+    
+    <div id="zona-extra" style="margin-top:12px; display:none;">
+      <button class="priv-alert-btn priv-alert-btn-neutral" id="btn-ver-ejemplos" type="button" style="width:100%; margin-bottom:10px;">Ver ejemplos</button>
+      <div id="contenedor-ejemplos" style="display:none; font-family:monospace; font-size:13px; color:var(--text-main); margin-bottom:10px; padding:10px; background:rgba(255,255,255,0.4); border-radius:8px; border:1px solid rgba(0,0,0,0.05);"></div>
       <div id="zona-enmascarar" style="display:none;">
-        <button id="btn-enmascarar" type="button" style="width:100%;">Enmascarar detectado</button>
+        <button class="priv-alert-btn priv-alert-btn-neutral" id="btn-enmascarar" type="button" style="width:100%; display:flex; justify-content:center; align-items:center; gap:6px;">
+          <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+          Enmascarar detectado
+        </button>
       </div>
     </div>
   `;
 
+  // --- INICIO DE LÓGICA DE TEMA Y POSICIÓN ---
+
+  // 1. Leer ambas configuraciones del storage
+  const { posicionAlerta, theme } = await chrome.storage.local.get(["posicionAlerta", "theme"]);
+
+  // 2. Determinar Posición
+  const posicion = posicionAlerta ?? "bottom-right";
+  const estilosPosicion = {
+    "bottom-right": { bottom: "24px", right: "24px", left: "auto", top: "auto" },
+    "bottom-left": { bottom: "24px", left: "24px", right: "auto", top: "auto" },
+    "top-right": { top: "24px", right: "24px", left: "auto", bottom: "auto" },
+    "top-left": { top: "24px", left: "24px", right: "auto", bottom: "auto" }
+  };
+
+  // 3. Determinar Tema
+  let temaFinal = theme ?? "system";
+  if (temaFinal === "system") {
+    temaFinal = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+
+  // 4. Asignar clases
+  aviso.className = `priv-alert ${temaFinal === "dark" ? "priv-alert-dark" : "priv-alert-light"}`;
+
+  // 5. Aplicar base position styles
   Object.assign(aviso.style, {
     position: "fixed",
-    bottom: "20px",
-    right: "20px",
-    width: "360px",
-    backgroundColor: "#FFE100",
-    color: "#222",
-    padding: "12px 14px",
-    borderRadius: "12px",
-    border: "1px solid #f0e2a0",
-    boxShadow: "0 6px 16px rgba(0,0,0,0.18)",
-    fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
-    fontSize: "14px",
-    zIndex: "2147483647"
+    width: "380px",
+    padding: "16px",
+    borderRadius: "16px",
+    fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    zIndex: "2147483647",
+    ...estilosPosicion[posicion]
   });
 
-  const styleBtnBase = {
-    flex: "1 1 0",
-    padding: "10px 12px",
-    borderRadius: "30px",
-    border: "1px solid #dcdcdc",
-    background: "#fff",
-    cursor: "pointer",
-    fontWeight: "600"
-  };
-  const styleBtnAceptar = { ...styleBtnBase, background: "linear-gradient(to bottom, #D400FF, #2600FF)", color: "#fff" };
-  const styleBtnOmitir  = { ...styleBtnBase, background: "linear-gradient(to bottom, #D400FF, #FF0004)", color: "#fff" };
+  // --- FIN DE LÓGICA DE TEMA Y POSICIÓN ---
 
   document.body.appendChild(aviso);
   avisoActivo = aviso;
 
+  let accionResueltaVisualmente = false;
+
+  // Prevenir que hacer click en la alerta quite el foco del input
+  aviso.addEventListener("mousedown", (e) => e.preventDefault());
+
+  // Cerrar cuando el input original pierda foco (y el click no fue en la alerta)
+  if (ultimoTarget) {
+    blurListenerActual = () => {
+      if (ignorarEventosProgramaticos) return; // Si fue un blur forzado por nuestra extensión, ignóralo
+      setTimeout(() => {
+        if (document.activeElement !== ultimoTarget) {
+          limpiarAviso({ respectHover: false });
+        }
+      }, 150);
+    };
+    ultimoTarget.addEventListener("blur", blurListenerActual);
+  }
+
   // AUTOCIERRE con pausa por hover + tope duro
   aviso.addEventListener("mouseenter", stopAutoClose);
-  aviso.addEventListener("mouseleave", startAutoClose);
+  aviso.addEventListener("mouseleave", () => {
+    if (accionResueltaVisualmente) {
+      clearTimers();
+      limpiarAviso({ respectHover: false });
+      setTimeout(() => procesarSiguienteDeLaCola(), 350);
+    } else {
+      startAutoClose();
+    }
+  });
   startAutoClose();
 
   // Estado del aviso visible (para “ignorar” si se cierra solo)
   avisoPendiente = { tipo, sesion: sesionEntrada, actionTomada: false };
 
   // Bind de botones
+  const btnCerrar = aviso.querySelector("#btn-cerrar-aviso");
   const btnOmitir = aviso.querySelector("#btn-omitir");
   const btnAceptar = aviso.querySelector("#btn-aceptar");
   const accionesInferiores = aviso.querySelector("#acciones-inferiores");
@@ -680,25 +1465,50 @@ function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
   const zonaEnmascarar = aviso.querySelector("#zona-enmascarar");
   const btnEnmascarar = aviso.querySelector("#btn-enmascarar");
 
-  Object.assign(btnOmitir.style, styleBtnOmitir, { border: "none" });
-  Object.assign(btnAceptar.style, styleBtnAceptar, { border: "none" });
+  btnCerrar.addEventListener("click", () => limpiarAviso({ respectHover: false }));
 
-  Object.assign(btnVerEjemplos.style, {
-    padding: "10px 12px",
-    borderRadius: "10px",
-    border: "1px solid #dcdcdc",
-    background: "#fff",
-    cursor: "pointer",
-    fontWeight: "600"
-  });
-  Object.assign(btnEnmascarar.style, {
-    padding: "10px 12px",
-    borderRadius: "10px",
-    border: "1px solid #dcdcdc",
-    background: "#ffe9b3",
-    cursor: "pointer",
-    fontWeight: "600"
-  });
+  // Helper de estado resuelto visual
+  function mostrarEstadoResuelto(texto = "Resuelto", estado = "success", ocultarExtra = true) {
+    accionResueltaVisualmente = true;
+    
+    // Transicionar CSS variables para estado
+    if (estado === "success") {
+      aviso.style.setProperty("--bg", "var(--bg-success)");
+      aviso.style.setProperty("--border", "var(--border-success)");
+      aviso.style.setProperty("--text-main", "var(--text-success)");
+      aviso.style.setProperty("--text-sub", "var(--text-success)");
+      aviso.style.setProperty("--icon-warn", "var(--text-success)");
+    } else if (estado === "ignored") {
+      aviso.style.setProperty("--bg", "var(--bg-ignored)");
+      aviso.style.setProperty("--border", "var(--border-ignored)");
+      aviso.style.setProperty("--text-main", "var(--text-ignored)");
+      aviso.style.setProperty("--text-sub", "var(--text-ignored)");
+      aviso.style.setProperty("--icon-warn", "var(--text-ignored)");
+    }
+
+    if (ocultarExtra && zonaExtra) zonaExtra.style.display = "none";
+    
+    // Icono animado para success o ignorado
+    const svgIcon = estado === "success" 
+      ? `<svg style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>`
+      : `<svg style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>`;
+
+    accionesInferiores.style.display = "flex";
+    accionesInferiores.innerHTML = `
+      <div style="flex:1; display:flex; justify-content:center; align-items:center; gap:8px; padding:10px; font-weight:600; font-size:14px; color:inherit; background:transparent;">
+        ${svgIcon} ${texto}
+      </div>
+    `;
+
+    clearTimers();
+    postAceptarTimerId = setTimeout(() => {
+      // Solo cerrar si el mouse NO está encima
+      if (avisoActivo && avisoActivo.matches(':hover')) return;
+      
+      limpiarAviso({ respectHover: false });
+      setTimeout(() => procesarSiguienteDeLaCola(), 350);
+    }, 4500); // Fallback para móviles o si dejan el ratón encima un rato largo
+  }
 
   // Omitir (robusto)
   btnOmitir.addEventListener("click", async (e) => {
@@ -711,15 +1521,28 @@ function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
       sesion: sesionEntrada,
       input: ultimoTarget
     });
+    console.log(`[Omitir] Clic en Omitir. Silenciando '${tipo}' por ${OMIT_MS / 1000}s para este input.`);
 
-    await registrarAccionYCerrar("omitir", { forceClose: true });
+    await registrarAccionYCerrar("omitir", { forceClose: false });
+
+    // Estado visual Omitido
+    mostrarEstadoResuelto("Omitido", "ignored", true);
   });
 
-  // Aceptar (robusto)
+  // Aceptar
   btnAceptar.addEventListener("click", async (e) => {
     e.preventDefault();
     e.stopPropagation();
     stopAutoClose();
+
+    // Silenciar el campo también al aceptar para evitar doble advertencia 
+    // (ej. Fase 0.5 por etiqueta, y luego Fase 1 al terminar de escribir)
+    omitidosRuntime.set(tipo, {
+      until: Date.now() + OMIT_MS,
+      sesion: sesionEntrada,
+      input: ultimoTarget
+    });
+    console.log(`[Omitir] Clic en Aceptar. Silenciando '${tipo}' por ${OMIT_MS / 1000}s para este input.`);
 
     const pend = avisoPendiente;
     if (pend && !pend.actionTomada) {
@@ -727,17 +1550,22 @@ function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
       await guardarHistorialEntrada({ tipo, accion: "aceptar" });
     }
 
-    zonaExtra.style.display = "block";
-    if (accionesInferiores) accionesInferiores.style.display = "none";
+    const puedeEnmascarar =
+      ["correo", "dni", "tarjeta"].includes(tipo) &&
+      ultimosMatches.length > 0 &&
+      tipo !== "multiple_campos" &&
+      ultimoTarget && typeof ultimoTarget.value === "string";
 
-    const puedeEnmascarar = ["correo", "dni", "tarjeta"].includes(tipo) && ultimosMatches.length > 0 && tipo !== "multiple_campos";
-    zonaEnmascarar.style.display = puedeEnmascarar ? "block" : "none";
+    const tieneEjemplos = ejemplosEnmascarados(tipo).length > 0;
 
-    // Cierre de cortesía 5s después de aceptar si no tocan nada más
-    clearTimeout(postAceptarTimerId);
-    postAceptarTimerId = setTimeout(() => {
-      limpiarAviso({ respectHover: false });
-    }, 5000);
+    if (puedeEnmascarar || tieneEjemplos) {
+      zonaExtra.style.display = "block";
+      zonaEnmascarar.style.display = puedeEnmascarar ? "block" : "none";
+      btnVerEjemplos.style.display = tieneEjemplos ? "block" : "none";
+      mostrarEstadoResuelto("Aceptado", "success", false);
+    } else {
+      mostrarEstadoResuelto("Resuelto", "success", true);
+    }
   });
 
   btnVerEjemplos.addEventListener("click", () => {
@@ -749,16 +1577,13 @@ function mostrarAviso(titulo, vulnerabilidad, recomendacion, { tipo }) {
   });
 
   btnEnmascarar.addEventListener("click", () => {
-    if (ultimoTarget && ultimoTipoDetectado) {
-      enmascararValorEnInput(ultimoTarget, ultimoTipoDetectado);
-      const ok = document.createElement("div");
-      ok.textContent = "✅ Datos enmascarados en el campo.";
-      Object.assign(ok.style, { marginTop: "8px", fontSize: "13px", color: "#0a7a36", fontWeight: "600" });
-      aviso.appendChild(ok);
-      setTimeout(() => limpiarAviso({ respectHover: false }), 2000);
+    if (ultimoTarget && typeof ultimoTarget.value === "string") {
+      enmascararValorEnInput(ultimoTarget, tipo);
     }
+    mostrarEstadoResuelto("✔ Enmascarado y Resuelto", "#dcfce7", "#166534", "#bbf7d0", true);
   });
 }
+
 
 
 // =================== HU23: Recordatorio al cerrar sesión ===================
@@ -773,25 +1598,25 @@ const HU23_SITES = [
     key: "steam",
     hosts: ["steampowered.com", "steamcommunity.com"],
     hrefHints: ["/logout"], // ej: https://store.steampowered.com/logout/
-    textHints: ["cerrar sesión","cerrar sesion","logout","log out","sign out","logoff"]
+    textHints: ["cerrar sesión", "cerrar sesion", "logout", "log out", "sign out", "logoff"]
   },
   {
     key: "roblox",
     hosts: ["roblox.com"],
-    hrefHints: ["/logout","/auth/logout"],
-    textHints: ["cerrar sesión","cerrar sesion","logout","log out","sign out"]
+    hrefHints: ["/logout", "/auth/logout"],
+    textHints: ["cerrar sesión", "cerrar sesion", "logout", "log out", "sign out"]
   },
   {
     key: "epic",
     hosts: ["epicgames.com"],
-    hrefHints: ["/logout","/log-out","/signout"],
-    textHints: ["cerrar sesión","cerrar sesion","logout","log out","sign out"]
+    hrefHints: ["/logout", "/log-out", "/signout"],
+    textHints: ["cerrar sesión", "cerrar sesion", "logout", "log out", "sign out"]
   },
   {
     key: "discord",
     hosts: ["discord.com"],
     hrefHints: ["/logout"], // a veces no navega; nos apoyamos también en texto
-    textHints: ["cerrar sesión","cerrar sesion","logout","log out","sign out"]
+    textHints: ["cerrar sesión", "cerrar sesion", "logout", "log out", "sign out"]
   }
 ];
 
@@ -804,15 +1629,15 @@ function hu23_siteMatch() {
 }
 
 async function hu23_sessionGet(keys) {
-  try { if (chrome.storage?.session) return await chrome.storage.session.get(keys); } catch {}
+  try { if (chrome.storage?.session) return await chrome.storage.session.get(keys); } catch { }
   return await chrome.storage.local.get(keys);
 }
 async function hu23_sessionSet(obj) {
-  try { if (chrome.storage?.session) return await chrome.storage.session.set(obj); } catch {}
+  try { if (chrome.storage?.session) return await chrome.storage.session.set(obj); } catch { }
   return await chrome.storage.local.set(obj);
 }
 async function hu23_sessionRemove(keys) {
-  try { if (chrome.storage?.session) return await chrome.storage.session.remove(keys); } catch {}
+  try { if (chrome.storage?.session) return await chrome.storage.session.remove(keys); } catch { }
   return await chrome.storage.local.remove(keys);
 }
 
@@ -846,8 +1671,8 @@ function hu23_showBanner() {
 
   const host = location.hostname;
   const el = document.createElement("div");
-  el.setAttribute("role","dialog");
-  el.setAttribute("aria-live","polite");
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-live", "polite");
   Object.assign(el.style, {
     position: "fixed",
     left: "50%",
@@ -894,7 +1719,7 @@ function hu23_showBanner() {
   const btnClean = el.querySelector("#hu23-btn-clean");
   const btnClose = el.querySelector("#hu23-btn-close");
   btnClean.addEventListener("click", async () => {
-    try { await chrome.runtime.sendMessage({ type: "OPEN_CLEAR_SETTINGS" }); } catch {}
+    try { await chrome.runtime.sendMessage({ type: "OPEN_CLEAR_SETTINGS" }); } catch { }
     // El usuario decide cerrar; no autocerramos
   });
   btnClose.addEventListener("click", () => hu23_removeBanner());
@@ -911,9 +1736,13 @@ function hu23_isLogoutClick(target, siteCfg) {
     if (siteCfg.hrefHints.some(p => hrefLow.includes(p))) return true;
   }
 
-  // B) texto visible con hint
-  const txt = (target.innerText || target.textContent || "").trim().toLowerCase();
-  if (txt && siteCfg.textHints.some(t => txt.includes(t))) return true;
+  // B) texto visible del ELEMENTO INTERACTIVO más cercano (botón o link),
+  // NO del elemento clicado directamente (que podría ser un contenedor grande).
+  // Limitamos el texto a 80 caracteres para evitar falsos positivos en secciones
+  // que contienen "cerrar sesión" en alguno de sus hijos.
+  const interactivo = target.closest?.("button, a, [role='button'], [role='menuitem']") || target;
+  const txt = (interactivo.innerText || interactivo.textContent || "").trim().toLowerCase();
+  if (txt && txt.length <= 80 && siteCfg.textHints.some(t => txt.includes(t))) return true;
 
   return false;
 }
@@ -922,7 +1751,7 @@ function hu23_isLogoutClick(target, siteCfg) {
 const hu23Site = hu23_siteMatch();
 if (hu23Site) {
   // Mostrar si venimos de un logout que navegó
-  hu23_checkPendingAndShow().catch(()=>{});
+  hu23_checkPendingAndShow().catch(() => { });
 
   document.addEventListener("click", (ev) => {
     const t = ev.target;
@@ -930,7 +1759,7 @@ if (hu23Site) {
       // Mostrar inmediatamente…
       hu23_showBanner();
       // …y marcar pendiente por si la página navega y perdemos el banner
-      hu23_markPending().catch(()=>{});
+      hu23_markPending().catch(() => { });
     }
   }, { capture: true });
 }
@@ -946,31 +1775,31 @@ const HU24_PENDING_KEY = "HU24_PENDING_NOTE";
 // Pistas por texto visible (multilenguaje) y atributos comunes
 const HU24_TEXT_HINTS = [
   // Español
-  "continuar con google","iniciar sesión con google","inicia sesión con google",
-  "continuar con facebook","iniciar sesión con facebook",
-  "continuar con apple","iniciar sesión con apple",
-  "continuar con microsoft","iniciar sesión con microsoft",
-  "continuar con steam","iniciar sesión con steam",
-  "continuar con discord","iniciar sesión con discord",
-  "continuar con github","iniciar sesión con github",
-  "continuar con twitter","iniciar sesión con twitter","continuar con x","iniciar sesión con x",
-  "continuar con twitch","iniciar sesión con twitch",
-  "continuar con epic","iniciar sesión con epic","continuar con epic games","iniciar sesión con epic games",
-  "continuar con amazon","iniciar sesión con amazon",
-  "continuar con linkedin","iniciar sesión con linkedin",
+  "continuar con google", "iniciar sesión con google", "inicia sesión con google",
+  "continuar con facebook", "iniciar sesión con facebook",
+  "continuar con apple", "iniciar sesión con apple",
+  "continuar con microsoft", "iniciar sesión con microsoft",
+  "continuar con steam", "iniciar sesión con steam",
+  "continuar con discord", "iniciar sesión con discord",
+  "continuar con github", "iniciar sesión con github",
+  "continuar con twitter", "iniciar sesión con twitter", "continuar con x", "iniciar sesión con x",
+  "continuar con twitch", "iniciar sesión con twitch",
+  "continuar con epic", "iniciar sesión con epic", "continuar con epic games", "iniciar sesión con epic games",
+  "continuar con amazon", "iniciar sesión con amazon",
+  "continuar con linkedin", "iniciar sesión con linkedin",
   // Inglés
-  "continue with google","sign in with google","log in with google",
-  "continue with facebook","sign in with facebook","log in with facebook",
-  "continue with apple","sign in with apple",
-  "continue with microsoft","sign in with microsoft",
-  "continue with steam","sign in with steam",
-  "continue with discord","sign in with discord",
-  "continue with github","sign in with github",
-  "continue with twitter","sign in with twitter","continue with x","sign in with x",
-  "continue with twitch","sign in with twitch",
-  "continue with epic","sign in with epic","continue with epic games","sign in with epic games",
-  "continue with amazon","sign in with amazon",
-  "continue with linkedin","sign in with linkedin"
+  "continue with google", "sign in with google", "log in with google",
+  "continue with facebook", "sign in with facebook", "log in with facebook",
+  "continue with apple", "sign in with apple",
+  "continue with microsoft", "sign in with microsoft",
+  "continue with steam", "sign in with steam",
+  "continue with discord", "sign in with discord",
+  "continue with github", "sign in with github",
+  "continue with twitter", "sign in with twitter", "continue with x", "sign in with x",
+  "continue with twitch", "sign in with twitch",
+  "continue with epic", "sign in with epic", "continue with epic games", "sign in with epic games",
+  "continue with amazon", "sign in with amazon",
+  "continue with linkedin", "sign in with linkedin"
 ];
 
 // Pistas por destino (href hacia endpoints OAuth/OpenID conocidos)
@@ -991,23 +1820,23 @@ const HU24_HREF_HINTS = [
 
 // Proveedores por palabra clave (para pintar cabecera más clara)
 const HU24_PROVIDER_ALIASES = [
-  ["google","google"], ["facebook","facebook"], ["apple","apple"],
-  ["microsoft","microsoft"], ["steam","steam"], ["discord","discord"],
-  ["github","github"], ["twitter","twitter"], ["x ","x"],
-  ["twitch","twitch"], ["epic","epic"], ["epic games","epic games"],
-  ["amazon","amazon"], ["linkedin","linkedin"]
+  ["google", "google"], ["facebook", "facebook"], ["apple", "apple"],
+  ["microsoft", "microsoft"], ["steam", "steam"], ["discord", "discord"],
+  ["github", "github"], ["twitter", "twitter"], ["x ", "x"],
+  ["twitch", "twitch"], ["epic", "epic"], ["epic games", "epic games"],
+  ["amazon", "amazon"], ["linkedin", "linkedin"]
 ];
 
 async function hu24_sessionGet(keys) {
-  try { if (chrome.storage?.session) return await chrome.storage.session.get(keys); } catch {}
+  try { if (chrome.storage?.session) return await chrome.storage.session.get(keys); } catch { }
   return await chrome.storage.local.get(keys);
 }
 async function hu24_sessionSet(obj) {
-  try { if (chrome.storage?.session) return await chrome.storage.session.set(obj); } catch {}
+  try { if (chrome.storage?.session) return await chrome.storage.session.set(obj); } catch { }
   return await chrome.storage.local.set(obj);
 }
 async function hu24_sessionRemove(keys) {
-  try { if (chrome.storage?.session) return await chrome.storage.session.remove(keys); } catch {}
+  try { if (chrome.storage?.session) return await chrome.storage.session.remove(keys); } catch { }
   return await chrome.storage.local.remove(keys);
 }
 
@@ -1048,8 +1877,8 @@ function hu24_showNote(providerGuess = null) {
 
   const host = location.hostname;
   const el = document.createElement("div");
-  el.setAttribute("role","dialog");
-  el.setAttribute("aria-live","polite");
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-live", "polite");
   Object.assign(el.style, {
     position: "fixed",
     left: "50%",
@@ -1097,11 +1926,11 @@ function hu24_showNote(providerGuess = null) {
   hu24NoteEl = el;
 
   const btnPrivacy = el.querySelector("#hu24-btn-privacy");
-  const btnClose   = el.querySelector("#hu24-btn-close");
+  const btnClose = el.querySelector("#hu24-btn-close");
 
   // No autocierre; el usuario decide.
   btnPrivacy.addEventListener("click", async () => {
-    try { await chrome.runtime.sendMessage({ type: "HU23_OPEN_CLEAR_SETTINGS" }); } catch {}
+    try { await chrome.runtime.sendMessage({ type: "HU23_OPEN_CLEAR_SETTINGS" }); } catch { }
   });
   btnClose.addEventListener("click", () => hu24_removeNote());
 }
@@ -1159,9 +1988,9 @@ document.addEventListener("click", (ev) => {
   const { match, provider } = hu24_isSocialLoginClick(ev.target);
   if (match) {
     hu24_showNote(provider);
-    hu24_markPending(provider).catch(()=>{});
+    hu24_markPending(provider).catch(() => { });
   }
 }, { capture: true });
 
 // Si venimos de una navegación inmediatamente tras autorizar, re-muestra la nota
-hu24_checkPendingAndShow().catch(()=>{});
+hu24_checkPendingAndShow().catch(() => { });
