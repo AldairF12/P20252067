@@ -1,78 +1,172 @@
-/* ==================
-   Variables de Tema
-   ================== */
-body {
-  /* Tema Claro (Default) */
-  --bg-color: #f8f9fa;
-  --text-color: #212529;
-  --text-muted: #6c757d;
-  --card-bg: #ffffff;
-  --card-border: #e2e6ea;
-  --select-border: #ced4da;
-  --btn-bg: #007bff;
-  --btn-hover: #0056b3;
-  --switch-bg: #ccc;
-  --switch-bg-active: #28a745;
+/* ==========================================================================
+   IMPORTACIÓN DE FUENTES LOCALES (COMPATIBLE CON MANIFEST V3)
+   ========================================================================== */
+@font-face {
+  font-family: 'Black Ops One';
+  src: url('../fonts/BlackOpsOne-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('../fonts/SpaceGrotesk-VariableFont_wght.ttf') format('truetype');
+  font-weight: 300 700; /* Soporta todos los pesos al ser una fuente variable */
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ==========================================================================
+   CONFIGURACIÓN DE VARIABLES - TEMA CLARO PREMIUM (COOL WHITE TECH)
+   ========================================================================== */
+:root {
+  --bg-main: #e8ebe9;         
+  --bg-popup: #e4f7eb;        
+  --bg-card: #d0f5df;         
+  --header-bg: #1c291e;       
+  
+  --text-main: #0f1c10;       
+  --text-muted: #4a684a;      
+  --border-color: rgba(15, 28, 16, 0.08); 
+  
+  --switch-active: #10B981;   
+  --switch-inactive: #FF4F5E; 
+  --accent-blue: #3B1EFF;     
   --arrow-filter: grayscale(1) opacity(0.5);
-
-  font-family: 'Segoe UI', sans-serif;
-  width: 300px;
-  padding: 15px;
-  background-color: var(--bg-color);
-  color: var(--text-color);
 }
 
+/* ==========================================================================
+   CONFIGURACIÓN DE VARIABLES - TEMA OSCURO PREMIUM (CHARCOAL GAMER)
+   ========================================================================== */
 body.dark-theme {
-  /* Tema Oscuro */
-  --bg-color: #20232a;
-  --text-color: #e8eaf0;
-  --text-muted: #9a9fad;
-  --card-bg: #2a2e37;
-  --card-border: #3b3f4c;
-  --select-border: #4a5060;
-  --btn-bg: #3a86ff;
-  --btn-hover: #5c9eff;
-  --switch-bg: #4a5060;
-  --switch-bg-active: #3a86ff;
-  --arrow-filter: invert(1) opacity(0.6);
+  --bg-main: #0C0D11;
+  --bg-popup: #14161D;       
+  --bg-card: #21242C;        
+  --header-bg: #0A0A0F;      
+  
+  --text-main: #D7E8FA;      
+  --text-muted: #8E9BAE;     
+  --border-color: rgba(215, 232, 250, 0.08); 
+  
+  --switch-active: #5DF9C0;  
+  --switch-inactive: #FF4F5E;
+  --accent-blue: #3B1EFF;    
+  --arrow-filter: invert(1) opacity(0.7);
 }
 
-/* ==================
-   Estilos Generales
-   ================== */
-.titulo {
-  text-align: center;
-  font-size: 18px;
-  margin-bottom: 15px;
-  color: var(--text-color);
+/* ==========================================================================
+   ESTILOS BASE DE LA EXTENSIÓN
+   ========================================================================== */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: 'Space Grotesk', sans-serif; /* Todo el texto base usa Space Grotesk */
 }
 
-/* ==================
-   Interruptor (Toggle)
-   ================== */
-.interruptor-container {
+body {
+  width: 320px;
+  background-color: var(--bg-main);
+  padding: 0;
+  transition: background-color 0.2s ease;
+}
+
+.popup-container {
+  width: 320px;
+  background: var(--bg-popup);
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  transition: background-color 0.2s ease;
+}
+
+/* ==========================================================================
+   HEADER DINÁMICO
+   ========================================================================== */
+.popup-header {
+  background: var(--header-bg);
+  padding: 16px 18px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 15px;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-color);
 }
 
+.popup-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.shield-icon {
+  width: 32px;
+  height: 32px;
+  background: var(--switch-active); 
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s ease;
+}
+
+/* El título principal recibe la tipografía Black Ops One */
+.header-title {
+  font-family: 'Black Ops One', sans-serif;
+  font-size: 13px;
+  font-weight: 400;
+  color: #FFFFFF;
+  margin: 0;
+  line-height: 1.2;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  transition: color 0.2s ease;
+}
+
+body[data-activo="false"] .shield-icon {
+  background: var(--switch-inactive) !important;
+}
+
+body[data-activo="false"] .header-title {
+  color: var(--switch-inactive) !important;
+}
+
+.header-sub {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  margin: 0;
+}
+
+.popup-body {
+  padding: 14px 16px;
+}
+
+/* ==========================================================================
+   SLIDER INTERRUPTOR
+   ========================================================================== */
 .switch {
   position: relative;
   display: inline-block;
-  width: 50px;
+  width: 44px;
   height: 24px;
 }
 
-.switch input { display: none; }
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
 
 .slider {
   position: absolute;
   cursor: pointer;
-  background-color: var(--switch-bg);
-  border-radius: 34px;
   top: 0; left: 0; right: 0; bottom: 0;
-  transition: 0.4s;
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  transition: background-color 0.2s ease;
+}
+
+body:not(.dark-theme) input:not(:checked) + .slider {
+  background-color: #CBD5E1;
 }
 
 .slider:before {
@@ -80,135 +174,318 @@ body.dark-theme {
   content: "";
   height: 18px;
   width: 18px;
-  left: 4px;
+  left: 3px;
   bottom: 3px;
-  background-color: white;
-  transition: 0.4s;
+  background-color: #FFFFFF;
   border-radius: 50%;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
 }
 
 input:checked + .slider {
-  background-color: var(--switch-bg-active);
+  background-color: var(--switch-active);
 }
 
 input:checked + .slider:before {
-  transform: translateX(26px);
+  transform: translateX(20px);
 }
 
-/* ==================
-   Secciones
-   ================== */
-.opciones {
+/* ==========================================================================
+   TARJETAS Y METRICAS
+   ========================================================================== */
+.stat-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.stat-card {
+  background: var(--bg-card);
+  border-radius: 10px;
+  padding: 10px 12px;
+  border: 0.5px solid var(--border-color);
+  transition: background-color 0.2s ease;
+}
+
+.stat-split {
   display: flex;
+  align-items: flex-end;
   justify-content: space-between;
-  margin-bottom: 15px;
 }
 
-.columna h3 {
-  margin-bottom: 5px;
-  font-size: 14px;
-  color: var(--text-color);
+.stat-num {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 1;
+  margin-bottom: 3px;
 }
 
-.columna label {
-  display: block;
-  margin-bottom: 5px;
+.stat-label {
+  font-size: 11px;
   color: var(--text-muted);
+  display: flex;
+  align-items: center;
 }
 
-.columna input[type="checkbox"] {
-  accent-color: var(--btn-bg);
+.stat-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 5px;
 }
 
-
-.contador {
-  text-align: center;
-  background: #ffc107;
-  color: #333; /* Color de texto oscuro para contraste */
-  padding: 5px;
-  border-radius: 6px;
-  margin-bottom: 10px;
-  font-weight: bold;
+.activity-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 28px;
+  width: 50px;
 }
 
-.seccion-posicion,
-.seccion-tema {
-  margin-bottom: 15px;
-  padding: 10px;
-  background: var(--card-bg);
-  border-radius: 8px;
-  border: 1px solid var(--card-border);
+.bar-col {
+  flex: 1;
+  background: var(--border-color);
+  border-radius: 2px;
+  min-height: 4px;
 }
 
-.seccion-posicion h3,
-.seccion-tema h3 {
-  margin: 0 0 8px 0;
-  font-size: 14px;
-  color: var(--text-color);
+.bar-col.active-bar {
+  background: var(--switch-active);
 }
 
-.ayuda-posicion {
-  margin-top: 6px;
+/* ==========================================================================
+   SECCIONES INTERACTIVAS (TAGS & SITES)
+   ========================================================================== */
+.section-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 12px 0 8px 0;
+}
+
+.tag-label input[type="checkbox"],
+.site-card-label input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.tag-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 20px;
   font-size: 12px;
+  font-weight: 500;
+  border: 0.5px solid var(--border-color);
+  cursor: pointer;
+  color: var(--text-main);
+  background: var(--bg-popup);
+  user-select: none;
+  transition: all 0.15s ease;
+}
+
+.tag-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.tag-label input:checked + .tag-custom {
+  background: var(--header-bg);
+  color: var(--switch-active);
+  border-color: var(--switch-active);
+}
+
+.tag-label input:checked + .tag-custom .tag-dot {
+  background: var(--switch-active);
+}
+
+.sites-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.site-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 0.5px solid var(--border-color);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--text-main);
+  background: var(--bg-popup);
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.site-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.site-check {
+  margin-left: auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.site-check svg {
+  opacity: 0;
+}
+
+.site-card-label input:checked + .site-btn {
+  border-color: var(--switch-active);
+  background: rgba(93, 249, 192, 0.04);
+}
+
+.site-card-label input:checked + .site-btn .site-check {
+  background: var(--switch-active);
+  border-color: var(--switch-active);
+}
+
+.site-card-label input:checked + .site-btn .site-check svg {
+  opacity: 1;
+}
+
+/* ==========================================================================
+   CONFIGURACIÓN SELECTORES
+   ========================================================================== */
+.config-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.select-box {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.select-title {
+  font-size: 11px;
+  font-weight: 600;
   color: var(--text-muted);
 }
 
-/* ==================
-   Combobox Bonito (Nuevo)
-   ================== */
 .select-wrapper {
   position: relative;
 }
 
-/* Oculta la flecha por defecto */
 select {
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
-  /* Estilos del select */
   width: 100%;
-  padding: 8px 12px;
-  padding-right: 30px; /* Espacio para la flecha custom */
-  border-radius: 6px;
-  border: 1px solid var(--select-border);
-  font-size: 13px;
-  background-color: var(--bg-color);
-  color: var(--text-color);
+  padding: 6px 24px 6px 10px;
+  border-radius: 8px;
+  border: 0.5px solid var(--border-color);
+  font-size: 11px;
+  font-weight: 500;
+  background-color: var(--bg-card);
+  color: var(--text-main);
   cursor: pointer;
+  outline: none;
 }
 
-/* Flecha custom (SVG Base64) */
+select:focus {
+  border-color: var(--switch-active);
+}
+
 .select-wrapper::after {
   content: ' ';
   position: absolute;
   top: 50%;
-  right: 12px;
+  right: 8px;
   transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5H7z"></path></svg>');
+  width: 12px;
+  height: 12px;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>');
   background-size: contain;
   background-repeat: no-repeat;
   filter: var(--arrow-filter);
-  pointer-events: none; /* Permite hacer clic en el select */
+  pointer-events: none;
 }
 
-/* ==================
-   Botones
-   ================== */
+/* ==========================================================================
+   BOTONES E ENLACE FOOTER
+   ========================================================================== */
+.divider {
+  height: 0.5px;
+  background: var(--border-color);
+  margin: 14px 0;
+}
+
+.bottom-row {
+  display: flex;
+  gap: 6px;
+}
+
 button {
-  width: 100%;
-  margin-top: 5px;
-  padding: 8px;
-  background-color: var(--btn-bg);
-  border: none;
-  color: white;
-  border-radius: 6px;
+  flex: 1;
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
   cursor: pointer;
-  font-weight: 600;
-  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s ease;
 }
 
-button:hover {
-  background-color: var(--btn-hover);
+.btn-ghost {
+  border: 0.5px solid var(--border-color);
+  color: var(--text-main);
+  background: var(--bg-popup);
+}
+
+.btn-ghost:hover {
+  background: var(--bg-card);
+  border-color: var(--text-main);
+}
+
+.btn-accent {
+  border: none;
+  background: var(--accent-blue);
+  color: #FFFFFF;
+  box-shadow: 0 4px 12px rgba(59, 30, 255, 0.2);
+}
+
+.btn-accent:hover {
+  filter: brightness(1.15);
 }
