@@ -87,10 +87,11 @@ async function analizarTextoML(texto) {
 
 // ================= Regla correo + tarjeta (menos falsos positivos) =================
 function aplicarReglaCorreoTarjeta(texto, { expone, tipo }) {
-  const correoRegex = /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/;
+  const correoRegex = /\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b/i;
+  const tarjetaRegex = /\b(?:\d[ \-]?){13,19}\b/;
 
   const hayCorreo = correoRegex.test(texto);
-  const hayTarjeta = extraerTarjetasValidas(texto).length > 0;
+  const hayTarjeta = tarjetaRegex.test(texto);
 
   // 1) Si el modelo no marcó nada pero hay correo -> forzamos CORREO
   if (!expone && hayCorreo) {
@@ -504,6 +505,10 @@ document.addEventListener("copy", async (event) => {
     if (silenciadoPorOmitir(tipo, activeEl)) {
       limpiarAviso({ respectHover: false });
       return;
+    }
+
+    if (ultimoTipoDetectado && ultimoTipoDetectado !== tipo) {
+      resetOmisionesAlCambiarTipo(tipo);
     }
 
     ultimosMatches = detectarMatches(texto, tipo);
@@ -971,41 +976,6 @@ setupSteamAvatarWarning();
 
 
 
-// ================= VALIDACION DE TARJETAS (ESTRICTA) =================
-function validarTarjeta(str) {
-  const digits = str.replace(/\D/g, "");
-  // Prefijos: Visa (4), Mastercard (51-55), Discover (6011, 65), Amex (34, 37)
-  if (!/^(?:4\d{12}(?:\d{3})?|5[1-5]\d{14}|3[47]\d{13}|6(?:011|5\d{2})\d{12})$/.test(digits)) return false;
-  
-  // Algoritmo de Luhn
-  let sum = 0;
-  let alternate = false;
-  for (let i = digits.length - 1; i >= 0; i--) {
-    let n = parseInt(digits[i], 10);
-    if (alternate) {
-      n *= 2;
-      if (n > 9) n = (n % 10) + 1;
-    }
-    sum += n;
-    alternate = !alternate;
-  }
-  return sum % 10 === 0;
-}
-
-function extraerTarjetasValidas(texto) {
-  // Captura secuencias largas de números que parecen tarjetas
-  const re = /(?:^|[^\d])((?:\d[ \-]?){13,19})(?=[^\d]|$)/g;
-  const matches = [];
-  let m;
-  while ((m = re.exec(texto)) !== null) {
-    const candidato = m[1].trim();
-    if (validarTarjeta(candidato)) {
-      matches.push(candidato);
-    }
-  }
-  return matches;
-}
-
 // ================= LIMPIEZA DE DATOS YA ENMASCARADOS =================
 function limpiarDatosEnmascarados(texto) {
   if (!texto) return "";
@@ -1024,9 +994,8 @@ function limpiarDatosEnmascarados(texto) {
 function detectarTipoDato(texto) {
   texto = (texto || "").toLowerCase();
   if (/\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b/.test(texto)) return "correo";
-  // DNI: estricto a 8 dígitos exactos, otros tamaños van al modelo ML
-  if (/\b\d{8}\b/.test(texto)) return "dni";
-  if (extraerTarjetasValidas(texto).length > 0) return "tarjeta";
+  if (/\b\d{7,9}\b/.test(texto)) return "dni";
+  if (/\b(?:\d[ \-]?){13,19}\b/.test(texto)) return "tarjeta";
   // "nombre" solo lo detecta el modelo (evitar falsos positivos con regex)
   return "ninguno";
 }
@@ -1036,9 +1005,8 @@ function detectarTiposDato(texto) {
   const tipos = [];
   const t = (texto || "").toLowerCase();
   if (/\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b/.test(t)) tipos.push("correo");
-  // DNI: estricto a 8 dígitos exactos
-  if (/\b\d{8}\b/.test(t)) tipos.push("dni");
-  if (extraerTarjetasValidas(t).length > 0) tipos.push("tarjeta");
+  if (/\b\d{7,9}\b/.test(t)) tipos.push("dni");
+  if (/\b(?:\d[ \-]?){13,19}\b/.test(t)) tipos.push("tarjeta");
   return tipos;
 }
 
@@ -1066,8 +1034,8 @@ function detectarMatches(texto, tipo) {
   let re;
   switch (tipo) {
     case "correo": re = /\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b/gi; break;
-    case "dni": re = /\b\d{7,9}\b/g; break; // Se usa sólo para extraer/enmascarar cuando el ML lo detecta
-    case "tarjeta": re = /\b(?:\d[ \-]?){13,19}\b/g; break; // Regex laxo para extraer y permitir enmascarar tarjetas inválidas detectadas por ML
+    case "dni": re = /\b\d{7,9}\b/g; break;
+    case "tarjeta": re = /\b(?:\d[ \-]?){13,19}\b/g; break; // sin Luhn aquí
     case "nombre":
       re = /\b(?!.*[@\d])([A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}){1,3})\b/gi;
       break;

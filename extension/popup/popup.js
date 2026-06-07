@@ -12,15 +12,13 @@ const chkCorreo  = document.getElementById("tp-correo");
 const chkNombre  = document.getElementById("tp-nombre");
 const chkTarjeta = document.getElementById("tp-tarjeta");
 const chkDni     = document.getElementById("tp-dni");
+const chkEdad    = document.getElementById("tp-edad");
+const chkUbicacion = document.getElementById("tp-ubicacion");
+const chkEnlace  = document.getElementById("tp-enlace");
 
-// Referencia al select de posición
 const selectPosicion = document.getElementById("posicion-alerta");
-
-// AÑADIDO: Referencia al select de tema
-const selectTheme = document.getElementById("theme-select");
-
-// Contador
-const contadorEl = document.querySelector(".contador");
+const selectTheme    = document.getElementById("theme-select");
+const contadorEl     = document.querySelector(".stat-num"); // Cambiado para hacer match con el rediseño
 
 function hoyYYYYMMDD(d = new Date()) {
   const yyyy = d.getFullYear();
@@ -34,146 +32,126 @@ async function actualizarContadorDiario() {
   try {
     const { historialAvisos } = await chrome.storage.local.get("historialAvisos");
     const arr = Array.isArray(historialAvisos) ? historialAvisos : [];
-    const hoy = hoyYYYYMMDD();
-    const count = arr.filter(e => {
-      if (!e || !e.ts) return false;
-      const d = new Date(e.ts);
-      if (isNaN(d)) return false;
-      const ds = hoyYYYYMMDD(d);
-      return ds === hoy;
-    }).length;
-
+    const hoyStr = hoyYYYYMMDD();
+    const countHoy = arr.filter(it => it.ts && it.ts.startsWith(hoyStr)).length;
     if (contadorEl) {
-      contadorEl.textContent = `${count} ${plural(count, "aviso", "avisos")} hoy`;
+      contadorEl.textContent = countHoy;
     }
   } catch (e) {
-    if (contadorEl) contadorEl.textContent = "0 avisos hoy";
+    console.warn(e);
   }
 }
 
-// --- AÑADIDO: Función para aplicar el tema ---
-function aplicarTema(theme) {
-  let temaFinal = theme;
-  if (theme === 'system') {
-    // Revisa la preferencia del OS
-    const prefiereOscuro = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    temaFinal = prefiereOscuro ? 'dark' : 'light';
-  }
-
-  if (temaFinal === 'dark') {
-    document.body.classList.add('dark-theme');
-    document.body.classList.remove('light-theme');
+function aplicarTema(tema) {
+  if (tema === "dark") {
+    document.body.classList.add("dark-theme");
+  } else if (tema === "light") {
+    document.body.classList.remove("dark-theme");
   } else {
-    document.body.classList.add('light-theme');
-    document.body.classList.remove('dark-theme');
+    const mqDark = window.matchMedia("(prefers-color-scheme: dark)");
+    if (mqDark.matches) {
+      document.body.classList.add("dark-theme");
+    } else {
+      document.body.classList.remove("dark-theme");
+    }
   }
 }
 
-// Init UI desde storage
+// Inicialización de la interfaz
 document.addEventListener("DOMContentLoaded", async () => {
-  // MODIFICADO: Añadido "theme" y "posicionAlerta"
   const { activo, paginas, tipos, posicionAlerta, theme } = await chrome.storage.local.get([
-    "activo",
-    "paginas",
-    "tipos",
-    "posicionAlerta",
-    "theme"
+    "activo", "paginas", "tipos", "posicionAlerta", "theme"
   ]);
 
-  // Toggle
   const isActive = activo !== false;
   toggle.checked = isActive;
-  estadoLabel.textContent = isActive ? "Extensión activada" : "Extensión desactivada";
-  estadoLabel.style.color = isActive ? "green" : "red";
-
-  // Páginas
-  chkSteam.checked   = paginas?.steam   ?? true;
-  chkRoblox.checked  = paginas?.roblox  ?? true;
-  chkEpic.checked    = paginas?.epic    ?? true;
-  chkDiscord.checked = paginas?.discord ?? true;
-
-  // Tipos
-  chkCorreo.checked  = tipos?.correo  ?? true;
-  chkNombre.checked  = tipos?.nombre  ?? true;
-  chkTarjeta.checked = tipos?.tarjeta ?? true;
-  chkDni.checked     = tipos?.dni     ?? true;
+  estadoLabel.textContent = isActive ? "Privacidad activa" : "Privacidad inactiva";
   
-  // Cargar la posición guardada
-  if (selectPosicion) {
-    selectPosicion.value = posicionAlerta ?? "bottom-right";
-  }
-  
-  // AÑADIDO: Cargar y aplicar el tema guardado
+  // Sincronización instantánea del estado de color para el CSS
+  document.body.setAttribute("data-activo", isActive);
+
+  if (chkSteam) chkSteam.checked = paginas?.steam ?? true;
+  if (chkRoblox) chkRoblox.checked = paginas?.roblox ?? true;
+  if (chkEpic) chkEpic.checked = paginas?.epic ?? true;
+  if (chkDiscord) chkDiscord.checked = paginas?.discord ?? true;
+
+  if (chkCorreo) chkCorreo.checked = tipos?.correo ?? true;
+  if (chkNombre) chkNombre.checked = tipos?.nombre ?? true;
+  if (chkTarjeta) chkTarjeta.checked = tipos?.tarjeta ?? true;
+  if (chkDni) chkDni.checked = tipos?.dni ?? true;
+  if (chkEdad) chkEdad.checked = tipos?.edad ?? true;
+  if (chkUbicacion) chkUbicacion.checked = tipos?.ubicacion ?? true;
+  if (chkEnlace) chkEnlace.checked = tipos?.enlace_sospechoso ?? true;
+
+  if (selectPosicion) selectPosicion.value = posicionAlerta ?? "bottom-right";
+
   if (selectTheme) {
-    const savedTheme = theme ?? "system";
-    selectTheme.value = savedTheme;
-    aplicarTema(savedTheme);
+    const t = theme ?? "system";
+    selectTheme.value = t;
+    aplicarTema(t);
   }
 
-  // Contador diario
   actualizarContadorDiario();
 });
 
-// Reactualizar contador si cambia el storage
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.historialAvisos) {
-    actualizarContadorDiario();
-  }
-  // AÑADIDO: Escucha cambios de tema desde otras pestañas
-  if (area === "local" && changes.theme) {
-    const newTheme = changes.theme.newValue ?? "system";
-    selectTheme.value = newTheme;
-    aplicarTema(newTheme);
-  }
-});
-
-// Toggle activo
+// Listener del interruptor maestro
 toggle.addEventListener("change", async () => {
   const active = toggle.checked;
-  estadoLabel.textContent = active ? "Extensión activada" : "Extensión desactivada";
-  estadoLabel.style.color = active ? "green" : "red";
+  estadoLabel.textContent = active ? "Privacidad activa" : "Privacidad inactiva";
+  
+  // Cambia el color por CSS en 0 segundos
+  document.body.setAttribute("data-activo", active);
+  
   await chrome.storage.local.set({ activo: active });
 });
 
-// Guardar páginas
+// Guardar páginas autorizadas
 for (const [el, key] of [
   [chkSteam, "steam"],
   [chkRoblox, "roblox"],
   [chkEpic, "epic"],
   [chkDiscord, "discord"],
 ]) {
-  el.addEventListener("change", async () => {
-    const { paginas } = await chrome.storage.local.get("paginas");
-    await chrome.storage.local.set({
-      paginas: { steam: true, roblox: true, epic: true, discord: true, ...paginas, [key]: el.checked }
+  if (el) {
+    el.addEventListener("change", async () => {
+      const { paginas } = await chrome.storage.local.get("paginas");
+      await chrome.storage.local.set({
+        paginas: { steam: true, roblox: true, epic: true, discord: true, ...paginas, [key]: el.checked }
+      });
     });
-  });
+  }
 }
 
-// Guardar tipos
+// Guardar tipos de PII a interceptar
 for (const [el, key] of [
   [chkCorreo, "correo"],
   [chkNombre, "nombre"],
   [chkTarjeta, "tarjeta"],
   [chkDni, "dni"],
+  [chkEdad, "edad"],
+  [chkUbicacion, "ubicacion"],
+  [chkEnlace, "enlace_sospechoso"],
 ]) {
-  el.addEventListener("change", async () => {
-    const { tipos } = await chrome.storage.local.get("tipos");
-    await chrome.storage.local.set({
-      tipos: { correo: true, nombre: true, tarjeta: true, dni: true, ...tipos, [key]: el.checked }
+  if (el) {
+    el.addEventListener("change", async () => {
+      const { tipos } = await chrome.storage.local.get("tipos");
+      await chrome.storage.local.set({
+        tipos: {
+          correo: true, nombre: true, tarjeta: true, dni: true,
+          edad: true, ubicacion: true, enlace_sospechoso: true,
+          ...tipos, [key]: el.checked
+        }
+      });
     });
-  });
+  }
 }
 
-// Guardar la posición al cambiar
 if (selectPosicion) {
   selectPosicion.addEventListener("change", async () => {
-    const nuevaPosicion = selectPosicion.value;
-    await chrome.storage.local.set({ posicionAlerta: nuevaPosicion });
+    await chrome.storage.local.set({ posicionAlerta: selectPosicion.value });
   });
 }
 
-// AÑADIDO: Guardar y aplicar el tema al cambiar
 if (selectTheme) {
   selectTheme.addEventListener("change", async () => {
     const nuevoTema = selectTheme.value;
@@ -182,13 +160,11 @@ if (selectTheme) {
   });
 }
 
-// Botones de navegación
-document.getElementById("guia").addEventListener("click", () => {
-  const url = chrome.runtime.getURL("onboarding/guia_inicial.html");
-  chrome.tabs.create({ url });
+// Enlaces de navegación
+document.getElementById("historial").addEventListener("click", () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL("historial/historial.html") });
 });
 
-document.getElementById("historial").addEventListener("click", () => {
-  const url = chrome.runtime.getURL("historial/historial.html");
-  chrome.tabs.create({ url });
+document.getElementById("guia").addEventListener("click", () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/guia_inicial.html") });
 });

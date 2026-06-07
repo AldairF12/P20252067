@@ -24,9 +24,15 @@
           </section>
 
           <nav class="actions" aria-label="Acciones">
-            <button id="btn-privacidad" class="btn btn-plain">Privacidad</button>
-            <button id="btn-acerca" class="btn btn-plain">Acerca de</button>
-            <button id="btn-reset" class="btn btn-danger">Restablecer</button>
+            <button id="btn-privacidad" class="btn-nav-historial btn-secundario">
+              <span class="icon-btn">🔒</span> Privacidad
+            </button>
+            <button id="btn-acerca" class="btn-nav-historial btn-secundario">
+              <span class="icon-btn">ℹ️</span> Acerca de
+            </button>
+            <button id="btn-reset" class="btn-nav-historial btn-peligro">
+              <span class="icon-btn">🗑️</span> Restablecer
+            </button>
           </nav>
         </aside>
       </main>
@@ -47,17 +53,17 @@
         </div>
 
         <div class="row">
-          <div class="label">⚠️ Aviso:</div>
+          <div class="label">⚡ Aviso</div>
           <p class="value aviso">—</p>
         </div>
 
         <div class="row">
-          <div class="label">⚠️ Vulnerabilidad <abbr title="Información">ⓘ</abbr>:</div>
+          <div class="label">🛡️ Vulnerabilidad <abbr title="Información">ⓘ</abbr></div>
           <p class="value vuln">—</p>
         </div>
 
         <div class="row">
-          <div class="label">⚠️ Recomendación:</div>
+          <div class="label">💡 Recomendación</div>
           <p class="value recom">—</p>
         </div>
 
@@ -72,7 +78,7 @@
     <div id="privacy-overlay" class="overlay" hidden></div>
     <div id="privacy-modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="priv-title">
       <div class="modal-header">
-        <h2 id="priv-title">Política de Privacidad – Extensión de Navegador</h2>
+        <h2 id="priv-title">Política de Privacidad</h2>
       </div>
       <div class="modal-body">
         <p>La presente Política de Privacidad explica cómo nuestra extensión protege la información personal de los usuarios al momento de navegar o llenar formularios en línea.</p>
@@ -83,7 +89,7 @@
         <ul>
           <li>Detectar campos sensibles como nombre, correo o documento de identidad.</li>
           <li>Mostrar avisos previos cuando se detecta un riesgo de exposición de datos.</li>
-          <li>Aplicar técnicas de enmascarado, ocultando parcialmente información en campos visibles (ejemplo: mostrar solo parte de un número).</li>
+          <li>Aplicar técnicas de enmascarado, ocultando parcialmente información en campos visibles.</li>
         </ul>
         <p><strong>3. Avisos y recomendaciones</strong><br>
         Cuando se identifique una situación de riesgo, la extensión notificará al usuario mediante un aviso claro y no intrusivo, brindando además recomendaciones sobre cómo proteger su información.</p>
@@ -99,10 +105,10 @@
         Cualquier modificación a esta política será comunicada mediante una actualización visible en la extensión.</p>
       </div>
       <div class="modal-actions">
-        <button id="btn-priv-aceptar" class="btn btn-primary">Aceptar</button>
+        <button id="btn-priv-aceptar" class="btn-modal-action btn-modal-primary">Aceptar</button>
       </div>
     </div>
-    
+
     <div id="about-overlay" class="overlay" hidden></div>
     <div id="about-modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="about-title">
       <div class="modal-header">
@@ -124,15 +130,15 @@
             </span>
           </div>
         </div>
-        <p style="text-align: center; margin: 15px 0 0 0; font-size: 12px; color: var(--muted);">
+        <p style="text-align:center;margin:15px 0 0 0;font-size:12px;color:var(--txt-mid);">
           Tus datos se procesan localmente y no se envían a servidores.
         </p>
       </div>
       <div class="modal-actions">
-        <button id="btn-about-aceptar" class="btn btn-primary">Aceptar</button>
+        <button id="btn-about-aceptar" class="btn-modal-action btn-modal-primary">Aceptar</button>
       </div>
     </div>
-    
+
     <script src="historial.js"></script>
   </body>
 </html>
