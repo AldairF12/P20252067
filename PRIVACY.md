@@ -26,7 +26,7 @@ Esta información reside de forma segura en su disco duro y no tenemos forma de 
 
 La extensión requiere ciertos permisos técnicos para poder protegerlo activamente:
 *   **Acceso a páginas específicas (Host Permissions):** Solicitamos acceso a dominios seleccionados (Discord, Roblox, Steam, Epic Games) para poder integrar nuestro análisis de seguridad en sus chats y formularios.
-*   **Storage y Tabs:** Utilizado para guardar de forma segura sus configuraciones locales, el progreso del tutorial inicial y su historial privado de advertencias. Todo se mantiene en su equipo local.
+*   **Storage:** Utilizado para guardar de forma segura sus configuraciones locales, el progreso del tutorial inicial y su historial privado de advertencias. Todo se mantiene en su equipo local.
 
 ## 4. Compartir Información con Terceros
 
