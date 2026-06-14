@@ -153,6 +153,12 @@ export async function analizarTextoConModelo(texto) {
   let mejorLabel = null;
   let mejorProb  = 0;
 
+  // DEBUG opcional: ver qué está devolviendo el modelo
+  console.log("[ML]probs raw:", logits.slice(0,10));
+  console.log("[ML]probs softmax:", probs.slice(0,10));
+  console.log("[ML]LABELS:", LABELS);
+  console.log("[ML]probsMap:", JSON.stringify(probsMap, null, 2));
+
   for (const label of LABELS) {
     if (label.toLowerCase() === "ninguno") continue; // saltamos clase neutra
     const p = probsMap[label] ?? 0;
