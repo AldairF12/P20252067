@@ -1,4 +1,4 @@
-# 🔐 S.A.P.O. — Personal Data Privacy Protection System
+# 🔐 Personal Data Privacy Protection System
 
 > Browser extension based on Natural Language Processing (NLP) designed to detect potential exposure of personal data in online environments.
 
@@ -89,3 +89,5 @@ The system was designed with a **privacy-first approach**, prioritizing local pr
 ┌──────────────────────┐
 │    Privacy Alert     │
 └──────────────────────┘
+
+S.A.P.O. → Sistema de Alerta y Protección de la Privacidad Online 🐸
